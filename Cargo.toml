@@ -1,0 +1,15 @@
+[package]
+name = "image-flow"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "image_flow"
+crate-type = ["cdylib", "rlib"]
+
+[[example]]
+name = "filter_feed"
+path = "examples/filter_feed.rs"
+
+[dependencies]
+jni = "0.22"
