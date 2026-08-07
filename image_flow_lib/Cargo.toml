@@ -1,0 +1,16 @@
+[package]
+name = "image_flow_lib"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "image_flow"
+crate-type = ["cdylib", "rlib", "staticlib"]
+
+[[example]]
+name = "filter_feed"
+path = "../examples/filter_feed.rs"
+
+[dependencies]
+jni = "0.22"
+uniffi.workspace = true

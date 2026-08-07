@@ -12,12 +12,17 @@ pub fn fibonacci(n: u32) -> u64 {
     a
 }
 
+pub fn great_add(a: i32, b: i32) -> i64 {
+    (a + b).into()
+}
+
+// ANDROID exports
 #[cfg(target_os = "android")]
 mod android {
     use super::{fibonacci, greet};
+    use jni::Env;
     use jni::objects::{JClass, JString};
     use jni::sys::jint;
-    use jni::{Env, NativeMethod};
 
     include!(concat!(env!("OUT_DIR"), "/native_methods.rs"));
 
@@ -37,4 +42,26 @@ mod android {
     ) -> Result<jint, jni::errors::Error> {
         Ok(fibonacci(n as u32) as jint)
     }
+}
+
+// IOS exports
+#[cfg(target_os = "ios")]
+uniffi::setup_scaffolding!();
+
+#[cfg(target_os = "ios")]
+#[uniffi::export]
+fn native_greet(name: &str) -> String {
+    greet(name)
+}
+
+#[cfg(target_os = "ios")]
+#[uniffi::export]
+fn native_fibonacci(n: u32) -> u64 {
+    fibonacci(n)
+}
+
+#[cfg(target_os = "ios")]
+#[uniffi::export]
+fn native_great_add(a: i32, b: i32) -> i64 {
+    great_add(a, b)
 }
