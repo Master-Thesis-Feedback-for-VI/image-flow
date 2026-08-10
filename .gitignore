@@ -2,6 +2,7 @@
 /bindings
 /ios
 .DS_Store
+local.properties
 
 # Devenv
 .devenv*
