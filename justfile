@@ -2,8 +2,6 @@ androidTargets := "aarch64-linux-android armv7-linux-androideabi i686-linux-andr
 iosTargets := "aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios"
 targets := androidTargets + " " + iosTargets
 
-languages := "kotlin swift"
-
 default: build-release-all
 
 [group('tool-chain')]
@@ -33,26 +31,38 @@ build-mac:
 build-release-all: build-unix build-mac
 
 [group('bindings')]
-create-bindings lang:
-    mkdir -p "./bindings/$lang"; \
-    rm -rf "./bindings/$lang/*"; \
+[macos]
+[script]
+create-bindings-swift:
+    lang="swift"
+    aarch="aarch64-apple-ios-sim"
+    just build "$aarch"
+    mkdir -p "./bindings/$lang"
+    rm -rf ./bindings/$lang/*
     cargo run -p uniffi-bindgen -- generate \
-      --library "./target/aarch64-linux-android/release/libimage_flow.so" \
+      --library "./target/$aarch/release/libimage_flow.dylib" \
       --language "$lang" \
-      --out-dir "./bindings/$lang"; \
-
-create-bindings-all: 
-    just build "aarch64-linux-android"
-    for lang in {{languages}}; do \
-        just create-bindings $lang; \
-    done
+      --out-dir "./bindings/$lang"
 
     mv ./bindings/swift/image_flowFFI.modulemap ./bindings/swift/module.modulemap
-    
+
+[group('bindings')]
+[script]
+create-bindings-kotlin:
+    lang="kotlin"
+    aarch="aarch64-linux-android"
+    just build "$aarch"
+    mkdir -p "./bindings/$lang"
+    rm -rf ./bindings/$lang/*
+    cargo run -p uniffi-bindgen -- generate \
+      --library "./target/$aarch/release/libimage_flow.so" \
+      --language "$lang" \
+      --no-format \
+      --out-dir "./bindings/$lang"
 
 [group('bindings')]
 [macos]
-swift-build-bindings: create-bindings build-mac
+swift-build-xcode-bindings: build-mac create-bindings-swift
     mkdir -p target/ios-universal-sim/release
     rm -rf target/ios-universal-sim/release/*
 
@@ -69,3 +79,6 @@ swift-build-bindings: create-bindings build-mac
         -library target/ios-universal-sim/release/libimage_flow.a \
         -headers bindings/swift/ \
         -output ios/Mobile.xcframework
+
+[group('bindings')]
+create-bindings-all: create-bindings-swift create-bindings-kotlin
