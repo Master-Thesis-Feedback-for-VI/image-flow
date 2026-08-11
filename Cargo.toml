@@ -1,5 +1,6 @@
 [workspace]
 members = ["image_flow_lib", "uniffi-bindgen"]
+exclude = ["vendor/opencv"]
 resolver = "3"
 
 [workspace.package]
