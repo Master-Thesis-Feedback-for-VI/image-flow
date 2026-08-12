@@ -1,11 +1,11 @@
 [package]
-name = "uniffi-bindgen"
+name = "uniffi-bindgen-runner"
 version.workspace = true
 edition.workspace = true
 
 [[bin]]
-name = "uniffi-bindgen"
-path = "uniffi-bindgen.rs"
+name = "uniffi-bindgen-runner"
+path = "uniffi-bindgen-runner.rs"
 
 [dependencies]
 uniffi = { workspace = true, features = ["cli"] }

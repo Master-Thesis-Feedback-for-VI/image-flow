@@ -39,7 +39,7 @@ create-bindings-swift:
     just build "$aarch"
     mkdir -p "./bindings/$lang"
     rm -rf ./bindings/$lang/*
-    cargo run -p uniffi-bindgen -- generate \
+    cargo run -p uniffi-bindgen-runner -- generate \
       --library "./target/$aarch/release/libimage_flow.dylib" \
       --language "$lang" \
       --out-dir "./bindings/$lang"
@@ -54,7 +54,7 @@ create-bindings-kotlin:
     just build "$aarch"
     mkdir -p "./bindings/$lang"
     rm -rf ./bindings/$lang/*
-    cargo run -p uniffi-bindgen -- generate \
+    cargo run -p uniffi-bindgen-runner -- generate \
       --library "./target/$aarch/release/libimage_flow.so" \
       --language "$lang" \
       --no-format \
@@ -82,3 +82,8 @@ swift-build-xcode-bindings: build-mac create-bindings-swift
 
 [group('bindings')]
 create-bindings-all: create-bindings-swift create-bindings-kotlin
+
+[group('house keeping')]
+clean:
+    cargo clean
+    rm -rf ./.android ./bindings

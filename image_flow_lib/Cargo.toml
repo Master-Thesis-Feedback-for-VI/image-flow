@@ -7,20 +7,32 @@ edition = "2024"
 name = "image_flow"
 crate-type = ["cdylib", "rlib", "staticlib"]
 
+[profile.dev.package]
+insta.opt-level = 3
+similar.opt-level = 3
+
 [[example]]
 name = "filter_feed"
 path = "../examples/filter_feed.rs"
 
 [dependencies]
-chrono = "0.4"
-jni = "0.22"
+# chrono = "0.4"
+# opencv = { version = "0.100", features = ["clang-runtime"] }
+# toml = { version = "1.1", features = ["serde"] }
+# uuid = { version = "1.24", features = ["v7", "serde"] }
+reqwest = { version = "0.13", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-toml = { version = "1.1", features = ["serde"] }
-uniffi.workspace = true
-uuid = { version = "1.24", features = ["v7", "serde"] }
+tokio = { version = "1.53", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
+uniffi.workspace = true
 
 [dev-dependencies]
 insta = "1.48"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
