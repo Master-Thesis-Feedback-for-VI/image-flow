@@ -1,3 +1,7 @@
+//!
+//!
+//!
+
 #[derive(Debug, Clone, Copy, uniffi::Record)]
 pub struct Coordinate {
     pub lat: f64,
@@ -8,18 +12,18 @@ impl Coordinate {
     /// This is pure for Debugging purposes
     #[allow(dead_code)]
     fn print_location_url(self) -> String {
-        return format!(
+        format!(
             "https://www.openstreetmap.org/?mlat={}&mlon={}#map=16/{}/{}",
             self.lat, self.lon, self.lat, self.lon
-        );
+        )
     }
 }
 
 /// [`DangerLevel`] describes how dangerouse a given context is. This is a general description with
 /// Levels similar to logging libraries. Concrete examples of Dangers are for example Danger
-/// depending on the location. Danger is in genral very subjective and really dependant on an
+/// depending on the location. Danger is in general very subjective and really dependant on an
 /// situation. This is in no way a perfect solution but rather a heurestic which that can help
-/// assesing the real danger of the situation by the user.
+/// assessing the real danger of the situation by the user.
 ///
 /// Currently we have the following dangers context defined:
 /// - [`LocationDangerLevel`] TODO
@@ -28,19 +32,64 @@ impl Coordinate {
 pub enum DangerLevel {
     /// Debug only server for testing and development purposes
     Debug,
-    /// TODO explain this
+
+    /// Harmless is the less urgent level of danger. Harmless is used when no danger whats so ever
+    /// can be inferred.
+    ///
+    /// ## Context [`LocationDangerLevel`]
+    /// These are locations where other traffic participants simply do not exists, are strongly
+    /// reduced or simply is constrained to other pedestriants. In these situations we consider the
+    /// location as harmless.
     Harmless,
-    /// TODO explain this
+
+    /// We define Moderate as situations which can potentially lead to a dangerouse situation.
+    ///
+    /// ## Context [`LocationDangerLevel`]
+    /// The Moderate locations are those that are usually safe but can get well travelled by
+    /// pedestrians or other traffic participants such as in intersections where all type of
+    /// traffic participants can meet, making it potentially dangerouse.
+    ///
+    /// Other Situations can include when the user approaches an escalator or in general stairs
+    /// which can lead to falling.
     Moderate,
-    /// TODO explain this
+
+    /// As Dangerouse we define situations where it is per default dangerouse and requires the most
+    /// amount of attention.
+    ///
+    /// ## Context [`LocationDangerLevel`]
+    /// These are locations which should always be treated with care. If the user is positioned on
+    /// the street it should be marked dangerouse.
     Dangerouse,
 }
 
-pub type LocationDangerLevel = DangerLevel;
+/// This is a concrete distinct type to [`DangerLevel`] with the exact same levels. As to how we
+/// define each level; it is explained in the enum definitions of [`DangerLevel`].
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Ord, Eq)]
+pub struct LocationDangerLevel(pub DangerLevel);
+uniffi::custom_newtype!(LocationDangerLevel, DangerLevel);
+
 impl LocationDangerLevel {
-    pub async fn from_coords(coordinates: Coordinate) -> DangerLevel {
+    pub async fn from_coords(_coordinates: Coordinate) -> DangerLevel {
         todo!("IMPLEMENT")
         // DangerLevel::Dangerouse
+    }
+}
+
+impl From<DangerLevel> for LocationDangerLevel {
+    fn from(value: DangerLevel) -> Self {
+        Self(value)
+    }
+}
+
+impl From<LocationDangerLevel> for DangerLevel {
+    fn from(value: LocationDangerLevel) -> Self {
+        value.0
+    }
+}
+
+impl PartialEq<DangerLevel> for LocationDangerLevel {
+    fn eq(&self, other: &DangerLevel) -> bool {
+        self.0 == *other
     }
 }
 
@@ -93,7 +142,7 @@ mod tests {
                     DangerLevel::Dangerouse,
                     "failed for location: {name} ({cord:?})\nurl: {}",
                     cord.print_location_url()
-                )
+                );
             }
         }
 
@@ -130,7 +179,7 @@ mod tests {
                     DangerLevel::Moderate,
                     "failed for location: {name} ({cord:?})\nurl: {}",
                     cord.print_location_url()
-                )
+                );
             }
         }
 
@@ -151,7 +200,7 @@ mod tests {
                     DangerLevel::Harmless,
                     "failed for location: {name} ({cord:?})\nurl: {}",
                     cord.print_location_url()
-                )
+                );
             }
         }
     }
