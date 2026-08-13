@@ -1,9 +1,9 @@
-use std::env;
-
 use reqwest::{
     Client,
     header::{self, HeaderMap},
 };
+use serde_json::json;
+use tracing::instrument::WithSubscriber;
 
 use crate::error;
 
@@ -16,7 +16,8 @@ pub struct Coordinate {
 impl Coordinate {
     /// This is pure for Debugging purposes
     #[allow(dead_code)]
-    fn print_location_url(self) -> String {
+    #[must_use]
+    pub fn print_location_url(self) -> String {
         format!(
             "https://www.openstreetmap.org/?mlat={}&mlon={}#map=16/{}/{}",
             self.lat, self.lon, self.lat, self.lon
@@ -112,21 +113,34 @@ fn build_nominatim_client() -> crate::Result<Client> {
     Ok(cli)
 }
 
+/// Fetching the raw data from nominatim.
+///
+/// # Errors
+/// TODO
+pub async fn fetch_raw_nominatim_data(coords: Coordinate) -> crate::Result<serde_json::Value> {
+    let url = format!(
+        "https://nominatim.openstreetmap.org/reverse?format=json&lat={}&lon={}&zoom=18&addressdetails=1&extratags=1&namedetails=1",
+        coords.lat, coords.lon
+    );
+
+    let client = build_nominatim_client()?;
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(error::request)?
+        .error_for_status()
+        .map_err(error::request)?
+        .json::<serde_json::Value>()
+        .await
+        .map_err(error::request)?;
+
+    Ok(resp)
+}
+
 impl GeographicCategory {
     pub async fn from_cords(coordinates: Coordinate) -> crate::Result<Vec<Self>> {
-        let url = format!(
-            "https://nominatim.openstreetmap.org/reverse?format=json&lat={}&lon={}&zoom=18&addressdetails=1",
-            coordinates.lat, coordinates.lon
-        );
-
-        let client = build_nominatim_client()?;
-        let resp = client
-            .get(url)
-            .send()
-            .await
-            .map_err(error::request)?
-            .error_for_status()
-            .map_err(error::request)?;
+        let data = fetch_raw_nominatim_data(coordinates).await?;
 
         let categories = vec![Self::Forest];
         Ok(categories)

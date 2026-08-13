@@ -15,6 +15,10 @@ similar.opt-level = 3
 name = "filter_feed"
 path = "../examples/filter_feed.rs"
 
+[[example]]
+name = "fetch_json_locations"
+path = "../examples/fetch_json_locations.rs"
+
 [dependencies]
 # chrono = "0.4"
 # opencv = { version = "0.100", features = ["clang-runtime"] }
