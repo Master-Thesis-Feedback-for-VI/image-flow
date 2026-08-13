@@ -1,6 +1,11 @@
-//!
-//!
-//!
+use std::env;
+
+use reqwest::{
+    Client,
+    header::{self, HeaderMap},
+};
+
+use crate::error;
 
 #[derive(Debug, Clone, Copy, uniffi::Record)]
 pub struct Coordinate {
@@ -49,7 +54,7 @@ pub enum DangerLevel {
     /// pedestrians or other traffic participants such as in intersections where all type of
     /// traffic participants can meet, making it potentially dangerouse.
     ///
-    /// Other Situations can include when the user approaches an escalator or in general stairs
+    /// Other Situations can include when the user approaches an escalator or in genral stairs
     /// which can lead to falling.
     Moderate,
 
@@ -57,39 +62,88 @@ pub enum DangerLevel {
     /// amount of attention.
     ///
     /// ## Context [`LocationDangerLevel`]
-    /// These are locations which should always be treated with care. If the user is positioned on
+    /// These are locations which should always be treated with care. If the usere is positioned on
     /// the street it should be marked dangerouse.
     Dangerouse,
 }
 
-/// This is a concrete distinct type to [`DangerLevel`] with the exact same levels. As to how we
-/// define each level; it is explained in the enum definitions of [`DangerLevel`].
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Ord, Eq)]
-pub struct LocationDangerLevel(pub DangerLevel);
-uniffi::custom_newtype!(LocationDangerLevel, DangerLevel);
+pub type LocationDangerLevel = DangerLevel;
 
-impl LocationDangerLevel {
-    pub async fn from_coords(_coordinates: Coordinate) -> DangerLevel {
-        todo!("IMPLEMENT")
-        // DangerLevel::Dangerouse
+/// All potential geographic categories supported.
+///
+/// <https://github.com/Master-Thesis-Feedback-for-VI/image-flow/issues/2>
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
+enum GeographicCategory {
+    Forest,
+
+    Outside,
+    Building,
+
+    Street,
+    Intersection,
+}
+
+fn build_nominatim_client() -> crate::Result<Client> {
+    const HTTP_REFERER: &str = match option_env!("IMAGE_FLOW_REFERER") {
+        Some(referer) => referer,
+        None => "https://github.com/Master-Thesis-Feedback-for-VI/image-flow",
+    };
+    const USER_AGENT: &str = match option_env!("IMAGE_FLOW_AGENT") {
+        Some(referer) => referer,
+        None => "image_flow/0.1",
+    };
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::REFERER,
+        header::HeaderValue::from_static(HTTP_REFERER),
+    );
+    headers.insert(
+        header::USER_AGENT,
+        header::HeaderValue::from_static(USER_AGENT),
+    );
+
+    let cli = Client::builder()
+        .default_headers(headers)
+        .build()
+        .map_err(error::build)?;
+
+    Ok(cli)
+}
+
+impl GeographicCategory {
+    pub async fn from_cords(coordinates: Coordinate) -> crate::Result<Vec<Self>> {
+        let url = format!(
+            "https://nominatim.openstreetmap.org/reverse?format=json&lat={}&lon={}&zoom=18&addressdetails=1",
+            coordinates.lat, coordinates.lon
+        );
+
+        let client = build_nominatim_client()?;
+        let resp = client
+            .get(url)
+            .send()
+            .await
+            .map_err(error::request)?
+            .error_for_status()
+            .map_err(error::request)?;
+
+        let categories = vec![Self::Forest];
+        Ok(categories)
+    }
+
+    pub const fn into_danger_level(self) -> LocationDangerLevel {
+        match self {
+            Self::Forest | Self::Building => LocationDangerLevel::Harmless,
+            Self::Street | Self::Outside => LocationDangerLevel::Dangerouse,
+            Self::Intersection => LocationDangerLevel::Moderate,
+        }
     }
 }
 
-impl From<DangerLevel> for LocationDangerLevel {
-    fn from(value: DangerLevel) -> Self {
-        Self(value)
-    }
-}
-
-impl From<LocationDangerLevel> for DangerLevel {
-    fn from(value: LocationDangerLevel) -> Self {
-        value.0
-    }
-}
-
-impl PartialEq<DangerLevel> for LocationDangerLevel {
-    fn eq(&self, other: &DangerLevel) -> bool {
-        self.0 == *other
+impl From<GeographicCategory> for DangerLevel {
+    fn from(value: GeographicCategory) -> Self {
+        value.into_danger_level()
     }
 }
 
@@ -136,9 +190,10 @@ mod tests {
             ]);
 
             for (name, cord) in dangerouse_locations {
-                let danger_level = LocationDangerLevel::from_coords(cord).await;
+                let category = GeographicCategory::from_cords(cord).await.unwrap();
+
                 assert_eq!(
-                    danger_level,
+                    category.first().unwrap().into_danger_level(),
                     DangerLevel::Dangerouse,
                     "failed for location: {name} ({cord:?})\nurl: {}",
                     cord.print_location_url()
@@ -173,9 +228,9 @@ mod tests {
             ]);
 
             for (name, cord) in moderate_locations {
-                let danger_level = LocationDangerLevel::from_coords(cord).await;
+                let category = GeographicCategory::from_cords(cord).await.unwrap();
                 assert_eq!(
-                    danger_level,
+                    category.first().unwrap().into_danger_level(),
                     DangerLevel::Moderate,
                     "failed for location: {name} ({cord:?})\nurl: {}",
                     cord.print_location_url()
@@ -194,9 +249,9 @@ mod tests {
             )]);
 
             for (name, cord) in harmless_locations {
-                let danger_level = LocationDangerLevel::from_coords(cord).await;
+                let category = GeographicCategory::from_cords(cord).await.unwrap();
                 assert_eq!(
-                    danger_level,
+                    category.first().unwrap().into_danger_level(),
                     DangerLevel::Harmless,
                     "failed for location: {name} ({cord:?})\nurl: {}",
                     cord.print_location_url()
