@@ -6,4 +6,8 @@ pub mod error;
 
 pub use error::{Error, Result};
 
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) mod tests;
+
 uniffi::setup_scaffolding!();

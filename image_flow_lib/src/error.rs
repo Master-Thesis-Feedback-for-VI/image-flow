@@ -17,6 +17,7 @@ struct Inner {
 pub(crate) enum Kind {
     Request,
     Build,
+    Serialization,
 }
 
 #[allow(clippy::use_self)]
@@ -57,5 +58,11 @@ impl fmt::Debug for Error {
         }
 
         builder.finish()
+    }
+}
+
+impl From<serde_json::Error> for crate::Error {
+    fn from(value: serde_json::Error) -> Self {
+        Self::new(Kind::Serialization, Some(value))
     }
 }
