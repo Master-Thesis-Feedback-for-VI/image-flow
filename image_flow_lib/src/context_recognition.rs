@@ -75,8 +75,6 @@ pub enum DangerLevel {
     Dangerouse,
 }
 
-pub type LocationDangerLevel = DangerLevel;
-
 /// All potential geographic categories supported.
 ///
 /// <https://github.com/Master-Thesis-Feedback-for-VI/image-flow/issues/2>
@@ -89,9 +87,71 @@ enum GeographicCategory {
     Building,
 
     Street,
+    Pedestrian,
     Intersection,
 
     Elevator,
+}
+
+impl GeographicCategory {
+    fn into_category(loc_data: &NominatimLocationData) -> HashSet<Self> {
+        let mut categories = HashSet::new();
+        let location_type = loc_data.location_type.as_str();
+        match location_type {
+            "elevator" => {
+                categories.insert(Self::Elevator);
+            }
+            "secondary" => {}
+            "apartments" => {
+                categories.insert(Self::Building);
+            }
+            "track" => {
+                categories.insert(Self::Outside);
+                categories.insert(Self::Forest);
+            }
+            "pedestrian" => {
+                categories.insert(Self::Outside);
+                categories.insert(Self::Pedestrian);
+            }
+            "bicycle_parking" => {
+                categories.insert(Self::Outside);
+            }
+            _ => {
+                unreachable!(
+                    "New Type: {location_type}, check it out here: {}",
+                    loc_data.as_url_osm()
+                )
+            }
+        }
+
+        let location_class = loc_data.class.as_str();
+        match location_class {
+            "highway" => {
+                categories.insert(Self::Street);
+            }
+            "building" => {
+                categories.insert(Self::Building);
+            }
+            "amenity" => {
+                categories.insert(Self::Outside);
+            }
+            _ => {
+                unreachable!(
+                    "New Class: {location_class}, check it out here: {}",
+                    loc_data.as_url_osm()
+                )
+            }
+        }
+
+        categories
+    }
+
+    pub async fn from_cords(coordinates: Coordinate) -> crate::Result<HashSet<Self>> {
+        let location = NominatimLocationData::from_cords(coordinates).await?;
+        let categories = Self::into_category(&location);
+
+        Ok(categories)
+    }
 }
 
 fn build_nominatim_client() -> crate::Result<Client> {
@@ -186,59 +246,26 @@ impl NominatimLocationData {
     }
 }
 
-impl GeographicCategory {
-    fn into_category(loc_data: &NominatimLocationData) -> HashSet<Self> {
-        let mut categories = HashSet::new();
-        let location_type = loc_data.location_type.as_str();
-        match location_type {
-            "elevator" => {
-                categories.insert(Self::Elevator);
-            }
-            "secondary" => {}
-            "apartments" => {
-                categories.insert(Self::Building);
-            }
-            _ => {
-                unreachable!(
-                    "New Type: {location_type}, check it out here: {}",
-                    loc_data.as_url_osm()
-                )
-            }
-        }
-
-        let location_class = loc_data.class.as_str();
-        match location_class {
-            "highway" => {
-                categories.insert(Self::Street);
-            }
-            "building" => {
-                categories.insert(Self::Building);
-            }
-            _ => {
-                unreachable!(
-                    "New Class: {location_class}, check it out here: {}",
-                    loc_data.as_url_osm()
-                )
-            }
-        }
-
-        categories
-    }
-
-    pub async fn from_cords(coordinates: Coordinate) -> crate::Result<HashSet<Self>> {
-        let location = NominatimLocationData::from_cords(coordinates).await?;
-        let categories = Self::into_category(&location);
-
-        Ok(categories)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::{
         context_recognition::{GeographicCategory, NominatimLocationData},
         tests::data,
     };
+
+    #[tokio::test]
+    async fn check_all_available_types() {
+        let all_locs = [
+            data::HARMLESS_LOCATIONS,
+            data::MODERATE_LOCATIONS,
+            data::DANGEROUSE_LOCATIONS,
+        ]
+        .concat();
+
+        for (_name, loc) in all_locs {
+            _ = GeographicCategory::from_cords(loc).await.unwrap();
+        }
+    }
 
     #[tokio::test]
     async fn appartment() {
@@ -277,7 +304,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn testoteher() {
+    async fn karl_wichert_allee() {
         let loc = data::DANGEROUSE_LOCATIONS;
         let element = loc.first().unwrap();
         insta::assert_debug_snapshot!(element, @r#"
