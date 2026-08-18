@@ -4,6 +4,7 @@ use reqwest::{
 };
 use serde::Deserialize;
 use std::fmt::Write;
+use tokio::time::{self, Duration, Sleep, sleep};
 
 use crate::{
     context_recognition::Coordinate,
@@ -14,6 +15,8 @@ use crate::{
 const OVERPASS_URL: &str = "https://overpass-api.de/api/interpreter";
 const ROAD_TYPES: &str =
     "motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street";
+const MAX_RETRIES: usize = 5;
+const RETRY_DELAY: Duration = Duration::from_millis(500);
 
 /// Fetching the raw data from Overpass.
 ///
@@ -25,17 +28,32 @@ pub async fn fetch_raw_overpass_data(
 ) -> crate::Result<serde_json::Value> {
     let query = build_query(coordinates.lat, coordinates.lon, radius_m);
 
-    let response = throttled_post(OVERPASS_URL)
-        .await
-        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-        .body(format!("data={}", urlencoding_encode(&query)))
-        .send()
-        .await
-        .map_err(error::request)?
-        .error_for_status()
-        .map_err(error::request)?;
+    let body = format!("data={}", urlencoding_encode(&query));
 
-    response.json().await.map_err(error::serialization)
+    let mut sleep_dur = Duration::from_secs(0);
+    for attempt in 0..=MAX_RETRIES {
+        let response = throttled_post(OVERPASS_URL)
+            .await
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(body.clone())
+            .send()
+            .await;
+
+        match response {
+            Ok(response) => match response.error_for_status() {
+                Ok(response) => return response.json().await.map_err(error::serialization),
+                Err(_) if attempt < MAX_RETRIES => sleep(RETRY_DELAY).await,
+                Err(err) => return Err(error::request(err)),
+            },
+            Err(_) if attempt < MAX_RETRIES => sleep(RETRY_DELAY).await,
+            Err(err) => return Err(error::request(err)),
+        }
+
+        time::sleep(sleep_dur).await;
+        sleep_dur += Duration::from_secs(1);
+    }
+
+    unreachable!("retry loop must return or error")
 }
 
 #[derive(Debug, Deserialize)]

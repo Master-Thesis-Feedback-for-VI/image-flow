@@ -83,7 +83,7 @@ pub enum DangerLevel {
 ///
 /// <https://github.com/Master-Thesis-Feedback-for-VI/image-flow/issues/2>
 #[allow(dead_code)]
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GeographicCategory {
     Forest,
 
@@ -195,7 +195,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn appartment() {
+    async fn apartment() {
         let loc = data::DANGEROUSE_LOCATIONS;
         let element = loc.get(2).unwrap();
         insta::assert_debug_snapshot!(element, @r#"
@@ -222,12 +222,14 @@ mod tests {
         "#);
         insta::assert_snapshot!(nom_data.as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3715399&mlon=9.7125486#map=17/52.3715399/9.7125486");
 
-        let nom_data = GeographicCategory::from_cords(&element.1).await.unwrap();
-        insta::assert_debug_snapshot!(nom_data, @"
-        {
-            Intersection,
+        let categories = GeographicCategory::from_cords(&element.1).await.unwrap();
+        let mut vec_categories: Vec<GeographicCategory> = categories.into_iter().collect();
+        vec_categories.sort();
+        insta::assert_debug_snapshot!(vec_categories, @"
+        [
             Building,
-        }
+            Intersection,
+        ]
         ");
     }
 
@@ -259,11 +261,14 @@ mod tests {
         "#);
         insta::assert_snapshot!(nom_data.as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3860214&mlon=9.8088121#map=17/52.3860214/9.8088121");
 
-        let nom_data = GeographicCategory::extract_categories_from_nominatim(&nom_data);
-        insta::assert_debug_snapshot!(nom_data, @"
-        {
+        let categories = GeographicCategory::from_cords(&element.1).await.unwrap();
+        let mut vec_categories: Vec<GeographicCategory> = categories.into_iter().collect();
+        vec_categories.sort();
+        insta::assert_debug_snapshot!(vec_categories, @"
+        [
             Street,
-        }
+            Intersection,
+        ]
         ");
     }
 }
