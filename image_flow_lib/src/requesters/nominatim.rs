@@ -1,16 +1,15 @@
 use serde::Deserialize;
 
-use crate::{
-    context_recognition::Coordinate,
-    error,
-    requesters::client::{get_client, throttled_get},
-};
+use crate::{context_recognition::Coordinate, error, requesters::client::throttled_get};
 
 /// Fetching the raw data from nominatim.
 ///
 /// # Errors
 /// TODO
-pub async fn fetch_raw_nominatim_data(coords: &Coordinate) -> crate::Result<serde_json::Value> {
+pub async fn fetch_raw_nominatim_data<T: Into<Coordinate>>(
+    coordinates: T,
+) -> crate::Result<serde_json::Value> {
+    let coords: Coordinate = coordinates.into();
     let url = format!(
         "https://nominatim.openstreetmap.org/reverse?format=json&lat={}&lon={}&zoom=18&addressdetails=1&extratags=1&namedetails=1",
         coords.lat, coords.lon
@@ -55,16 +54,22 @@ pub(crate) struct NominatimLocationData {
 }
 
 impl NominatimLocationData {
-    #[allow(dead_code)]
-    pub(crate) fn as_url_osm(&self) -> String {
-        let lat = self.lat;
-        let lon = self.lon;
-        format!("https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=17/{lat}/{lon}")
-    }
-
-    pub(crate) async fn from_cords(cords: &Coordinate) -> crate::Result<Self> {
+    pub(crate) async fn from_cords<T: Into<Coordinate>>(cords: T) -> crate::Result<Self> {
         let data = fetch_raw_nominatim_data(cords).await?;
         let location: Self = serde_json::from_value(data)?;
         Ok(location)
+    }
+
+    pub(crate) const fn as_coordinate(&self) -> Coordinate {
+        Coordinate {
+            lat: self.lat,
+            lon: self.lon,
+        }
+    }
+}
+
+impl From<NominatimLocationData> for Coordinate {
+    fn from(value: NominatimLocationData) -> Self {
+        value.as_coordinate()
     }
 }

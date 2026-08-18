@@ -1,59 +1,66 @@
-use reqwest::{
-    Client,
-    header::{self, HeaderMap},
-};
+use reqwest::header::{self};
 use serde::Deserialize;
-use std::fmt::Write;
-use tokio::time::{self, Duration, Sleep, sleep};
+use std::{collections::HashSet, fmt::Write, sync::LazyLock};
+use tokio::time::{Duration, sleep};
 
-use crate::{
-    context_recognition::Coordinate,
-    error,
-    requesters::client::{get_client, throttled_post},
-};
+use crate::{context_recognition::Coordinate, error, requesters::client::throttled_post};
 
-const OVERPASS_URL: &str = "https://overpass-api.de/api/interpreter";
+// ===== Configuration =====
+
+static OVERPASS_URLS: LazyLock<&[&str]> = LazyLock::new(|| {
+    &[
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter",
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+        "https://overpass.osm.ch/api/interpreter",
+        "https://lz4.overpass-api.de/api/interpreter",
+        "https://z.overpass-api.de/api/interpreter",
+    ]
+});
+const RETRY_DELAY: Duration = Duration::from_millis(500);
+const OVERPASS_TIMEOUT: Duration = Duration::from_secs(10);
 const ROAD_TYPES: &str =
     "motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street";
-const MAX_RETRIES: usize = 5;
-const RETRY_DELAY: Duration = Duration::from_millis(500);
+
+// =========================
 
 /// Fetching the raw data from Overpass.
 ///
 /// # Errors
 /// TODO
-pub async fn fetch_raw_overpass_data(
-    coordinates: &Coordinate,
+pub async fn fetch_raw_overpass_data<T: Into<Coordinate>>(
+    coordinates: T,
     radius_m: f64,
 ) -> crate::Result<serde_json::Value> {
-    let query = build_query(coordinates.lat, coordinates.lon, radius_m);
+    let query = build_query(coordinates, radius_m);
 
     let body = format!("data={}", urlencoding_encode(&query));
 
-    let mut sleep_dur = Duration::from_secs(0);
-    for attempt in 0..=MAX_RETRIES {
-        let response = throttled_post(OVERPASS_URL)
+    let urls = *OVERPASS_URLS;
+    let mut last_error = None;
+    for &url in urls {
+        let response = throttled_post(url)
             .await
             .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
             .body(body.clone())
+            .timeout(OVERPASS_TIMEOUT)
             .send()
             .await;
 
         match response {
             Ok(response) => match response.error_for_status() {
                 Ok(response) => return response.json().await.map_err(error::serialization),
-                Err(_) if attempt < MAX_RETRIES => sleep(RETRY_DELAY).await,
-                Err(err) => return Err(error::request(err)),
+                Err(err) => {
+                    last_error = Some(error::request(err));
+                }
             },
-            Err(_) if attempt < MAX_RETRIES => sleep(RETRY_DELAY).await,
-            Err(err) => return Err(error::request(err)),
+            Err(err) => {
+                last_error = Some(error::request(err));
+            }
         }
-
-        time::sleep(sleep_dur).await;
-        sleep_dur += Duration::from_secs(1);
     }
 
-    unreachable!("retry loop must return or error")
+    Err(last_error.expect("retry loop must produce an error when all attempts fail"))
 }
 
 #[derive(Debug, Deserialize)]
@@ -78,7 +85,25 @@ pub struct Intersection {
     pub distance_m: f64,
 }
 
-fn build_query(lat: f64, lon: f64, radius_m: f64) -> String {
+impl Intersection {
+    pub(crate) const fn as_coordinates(&self) -> Coordinate {
+        Coordinate {
+            lat: self.lat,
+            lon: self.lon,
+        }
+    }
+}
+
+impl From<Intersection> for Coordinate {
+    fn from(value: Intersection) -> Self {
+        value.as_coordinates()
+    }
+}
+
+fn build_query<T: Into<Coordinate>>(coordinates: T, radius_m: f64) -> String {
+    let coordinates: Coordinate = coordinates.into();
+    let lat = coordinates.lat;
+    let lon = coordinates.lon;
     format!(
         r#"[out:json][timeout:25];
 way(around:{radius_m},{lat},{lon})["highway"~"^({ROAD_TYPES})$"]->.streets;
@@ -118,21 +143,27 @@ fn urlencoding_encode(input: &str) -> String {
     out
 }
 
-pub async fn find_nearby_intersections(
-    coordinates: &Coordinate,
+pub async fn find_nearby_intersections<T: Into<Coordinate>>(
+    coordinates: T,
     radius_m: f64,
 ) -> crate::Result<Vec<Intersection>> {
+    let coordinates: Coordinate = coordinates.into();
     let lat = coordinates.lat;
     let lon = coordinates.lon;
     let parsed: OverpassResponse =
         serde_json::from_value(fetch_raw_overpass_data(coordinates, radius_m).await?)
             .map_err(error::serialization)?;
 
+    let mut seen_node_ids = HashSet::new();
     let mut intersections: Vec<Intersection> = parsed
         .elements
         .into_iter()
         .filter(|e| e.elem_type == "node")
         .filter_map(|e| {
+            if !seen_node_ids.insert(e.id) {
+                return None;
+            }
+
             let (elat, elon) = (e.lat?, e.lon?);
             Some(Intersection {
                 node_id: e.id,

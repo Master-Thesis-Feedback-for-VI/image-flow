@@ -64,3 +64,27 @@ pub const HARMLESS_LOCATIONS: &[NameLocation] = &[(
         lon: 9.78945,
     },
 )];
+
+pub const INTERSECTION_LOCATIONS: &[NameLocation] = &[
+    (
+        "Cafe Safran",
+        Coordinate {
+            lat: 52.373_945,
+            lon: 9.718_928,
+        },
+    ),
+    (
+        "Lister Doener",
+        Coordinate {
+            lat: 52.388_617,
+            lon: 9.750_264,
+        },
+    ),
+    (
+        "Spannhagengarten",
+        Coordinate {
+            lat: 52.400_251,
+            lon: 9.780_959,
+        },
+    ),
+];

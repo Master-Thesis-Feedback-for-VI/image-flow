@@ -16,12 +16,12 @@ pub const HTTP_REFERER: &str = match option_env!("IMAGE_FLOW_REFERER") {
 
 pub const USER_AGENT: &str = match option_env!("IMAGE_FLOW_AGENT") {
     Some(referer) => referer,
-    None => "image_flow/0.1",
+    None => "image_flow/0.2",
 };
 
 static CLIENT: OnceCell<Client> = OnceCell::const_new();
 static LAST_REQUEST: Mutex<Option<Instant>> = Mutex::const_new(None);
-const MIN_INTERVAL: Duration = Duration::from_millis(500);
+const MIN_INTERVAL: Duration = Duration::from_millis(1_000);
 
 async fn init_client() -> Client {
     let headers = default_headers();

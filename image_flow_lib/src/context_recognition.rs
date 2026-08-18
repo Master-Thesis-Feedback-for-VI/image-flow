@@ -2,6 +2,8 @@ use std::{collections::HashSet, fmt::Display};
 
 use crate::requesters::{nominatim::NominatimLocationData, overpass::find_nearby_intersections};
 
+const MIN_INTERSECTION_NODES: usize = 2;
+
 #[derive(Debug, Clone, Copy, uniffi::Record)]
 pub struct Coordinate {
     pub lat: f64,
@@ -20,6 +22,15 @@ impl Coordinate {
     }
 }
 
+impl Coordinate {
+    #[allow(dead_code)]
+    pub(crate) fn as_url_osm(&self) -> String {
+        let lat = self.lat;
+        let lon = self.lon;
+        format!("https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=17/{lat}/{lon}")
+    }
+}
+
 impl Display for Coordinate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "(lat = {}, lon = {})", self.lat, self.lon)
@@ -30,9 +41,9 @@ impl Display for Coordinate {
 ///
 /// # Errors
 /// TODO
-pub async fn evaulate_location_into_categories(
-    pos: &Coordinate,
-) -> crate::Result<HashSet<GeographicCategory>> {
+pub async fn evaulate_location_into_categories<T: Into<Coordinate>>(
+    pos: T,
+) -> crate::Result<UniqueGeographicCategories> {
     GeographicCategory::from_cords(pos).await
 }
 
@@ -97,9 +108,15 @@ pub enum GeographicCategory {
     Elevator,
 }
 
+pub type UniqueGeographicCategories = HashSet<GeographicCategory>;
+
 impl GeographicCategory {
-    fn extract_categories_from_nominatim(loc_data: &NominatimLocationData) -> HashSet<Self> {
+    async fn extract_categories_from_nominatim<T: Into<Coordinate>>(
+        coordinates: T,
+    ) -> crate::Result<UniqueGeographicCategories> {
+        let loc_data = NominatimLocationData::from_cords(coordinates).await?;
         let mut categories = HashSet::new();
+
         let location_type = loc_data.location_type.as_str();
         match location_type {
             "elevator" => {
@@ -123,7 +140,7 @@ impl GeographicCategory {
             _ => {
                 unreachable!(
                     "New Type: {location_type}, check it out here: {}",
-                    loc_data.as_url_osm()
+                    loc_data.as_coordinate().as_url_osm()
                 )
             }
         }
@@ -142,32 +159,40 @@ impl GeographicCategory {
             _ => {
                 unreachable!(
                     "New Class: {location_class}, check it out here: {}",
-                    loc_data.as_url_osm()
+                    loc_data.as_coordinate().as_url_osm()
                 )
             }
         }
 
-        categories
+        Ok(categories)
     }
 
-    async fn extract_intersection_from_overpass(coordinates: &Coordinate) -> crate::Result<bool> {
-        let intersections = find_nearby_intersections(coordinates, 50.).await?;
+    async fn extract_categories_from_overpass<T: Into<Coordinate>>(
+        coordinates: T,
+    ) -> crate::Result<UniqueGeographicCategories> {
+        let mut categories = HashSet::new();
 
-        Ok(!intersections.is_empty())
+        let intersections = find_nearby_intersections(coordinates, 50.).await?;
+        if intersections.len() >= MIN_INTERSECTION_NODES {
+            categories.insert(Self::Intersection);
+        }
+
+        Ok(categories)
     }
 
     /// TODO
     ///
     /// # Errors
     /// TODO
-    pub async fn from_cords(coordinates: &Coordinate) -> crate::Result<HashSet<Self>> {
-        let location = NominatimLocationData::from_cords(coordinates).await?;
-        let mut categories = Self::extract_categories_from_nominatim(&location);
+    pub async fn from_cords<T: Into<Coordinate>>(
+        coordinates: T,
+    ) -> crate::Result<UniqueGeographicCategories> {
+        let coordinates: Coordinate = coordinates.into();
 
-        if Self::extract_intersection_from_overpass(coordinates).await? {
-            categories.insert(Self::Intersection);
-        }
+        let mut categories = Self::extract_categories_from_nominatim(coordinates).await?;
+        let overpass_categories = Self::extract_categories_from_overpass(coordinates).await?;
 
+        categories.extend(overpass_categories);
         Ok(categories)
     }
 }
@@ -175,8 +200,8 @@ impl GeographicCategory {
 #[cfg(test)]
 mod tests {
     use crate::{
-        context_recognition::{GeographicCategory, NominatimLocationData},
-        tests::data,
+        context_recognition::{Coordinate, GeographicCategory, NominatimLocationData},
+        tests::data::{self, INTERSECTION_LOCATIONS},
     };
 
     #[tokio::test]
@@ -189,8 +214,9 @@ mod tests {
         .concat();
 
         for (_name, loc) in all_locs {
-            let nom = NominatimLocationData::from_cords(&loc).await.unwrap();
-            _ = GeographicCategory::extract_categories_from_nominatim(&nom);
+            _ = GeographicCategory::extract_categories_from_nominatim(loc)
+                .await
+                .unwrap();
         }
     }
 
@@ -208,7 +234,7 @@ mod tests {
         )
         "#);
 
-        let nom_data = NominatimLocationData::from_cords(&element.1).await.unwrap();
+        let nom_data = NominatimLocationData::from_cords(element.1).await.unwrap();
         insta::assert_debug_snapshot!(nom_data, @r#"
         NominatimLocationData {
             name_map: None,
@@ -220,9 +246,9 @@ mod tests {
             lon: 9.7125486,
         }
         "#);
-        insta::assert_snapshot!(nom_data.as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3715399&mlon=9.7125486#map=17/52.3715399/9.7125486");
+        insta::assert_snapshot!(&nom_data.as_coordinate().as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3715399&mlon=9.7125486#map=17/52.3715399/9.7125486");
 
-        let categories = GeographicCategory::from_cords(&element.1).await.unwrap();
+        let categories = GeographicCategory::from_cords(element.1).await.unwrap();
         let mut vec_categories: Vec<GeographicCategory> = categories.into_iter().collect();
         vec_categories.sort();
         insta::assert_debug_snapshot!(vec_categories, @"
@@ -247,7 +273,7 @@ mod tests {
         )
         "#);
 
-        let nom_data = NominatimLocationData::from_cords(&element.1).await.unwrap();
+        let nom_data = NominatimLocationData::from_cords(element.1).await.unwrap();
         insta::assert_debug_snapshot!(nom_data, @r#"
         NominatimLocationData {
             name_map: None,
@@ -259,9 +285,9 @@ mod tests {
             lon: 9.8088121,
         }
         "#);
-        insta::assert_snapshot!(nom_data.as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3860214&mlon=9.8088121#map=17/52.3860214/9.8088121");
+        insta::assert_snapshot!(&nom_data.as_coordinate().as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3860214&mlon=9.8088121#map=17/52.3860214/9.8088121");
 
-        let categories = GeographicCategory::from_cords(&element.1).await.unwrap();
+        let categories = GeographicCategory::from_cords(element.1).await.unwrap();
         let mut vec_categories: Vec<GeographicCategory> = categories.into_iter().collect();
         vec_categories.sort();
         insta::assert_debug_snapshot!(vec_categories, @"
@@ -270,5 +296,39 @@ mod tests {
             Intersection,
         ]
         ");
+    }
+
+    #[tokio::test]
+    async fn intersections() {
+        let intersection_locations = INTERSECTION_LOCATIONS;
+        for (name, location) in intersection_locations {
+            let categories = GeographicCategory::extract_categories_from_overpass(*location)
+                .await
+                .unwrap();
+
+            let url = location.as_url_osm();
+            assert!(
+                categories.contains(&GeographicCategory::Intersection),
+                "Location: {name} does not have a intersection although it should. Check out this url to inspect the location: {url}"
+            );
+        }
+
+        let no_intersection = (
+            "Ada-Lessing-Strasse",
+            Coordinate {
+                lat: 52.409_246,
+                lon: 9.781_501,
+            },
+        );
+        let categories = GeographicCategory::extract_categories_from_overpass(no_intersection.1)
+            .await
+            .unwrap();
+
+        let name = no_intersection.0;
+        let url = no_intersection.1.as_url_osm();
+        assert!(
+            !categories.contains(&GeographicCategory::Intersection),
+            "Location: {name} does not have a intersection although it should. Check out this url to inspect the location: {url}"
+        );
     }
 }

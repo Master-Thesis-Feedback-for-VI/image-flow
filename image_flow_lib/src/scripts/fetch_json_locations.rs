@@ -41,7 +41,7 @@ pub(crate) async fn main() {
 
     let mut data = Vec::new();
     for (k, v) in places {
-        let mut raw = fetch_raw_nominatim_data(&v).await.unwrap();
+        let mut raw = fetch_raw_nominatim_data(v).await.unwrap();
         raw.as_object_mut()
             .unwrap()
             .insert("name_map".to_string(), k.into());

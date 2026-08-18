@@ -16,7 +16,6 @@ struct Inner {
 #[derive(Debug)]
 pub(crate) enum Kind {
     Request,
-    Build,
     Serialization,
 }
 
@@ -40,13 +39,6 @@ where
     E: Into<BoxError>,
 {
     Error::new(Kind::Request, Some(e))
-}
-
-pub(crate) fn build<E>(e: E) -> Error
-where
-    E: Into<BoxError>,
-{
-    Error::new(Kind::Build, Some(e))
 }
 
 pub(crate) fn serialization<E>(e: E) -> Error
