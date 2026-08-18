@@ -21,9 +21,9 @@ similar.opt-level = 3
 name = "filter_feed"
 path = "../examples/filter_feed.rs"
 
-[[example]]
+[[bin]]
 name = "fetch_json_locations"
-path = "../examples/fetch_json_locations.rs"
+path = "./src/scripts/fetch_json_locations.rs"
 
 [dependencies]
 # chrono = "0.4"

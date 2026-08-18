@@ -6,6 +6,8 @@ pub mod error;
 
 pub use error::{Error, Result};
 
+pub mod requesters;
+
 #[cfg(test)]
 #[allow(dead_code)]
 pub(crate) mod tests;

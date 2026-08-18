@@ -1,12 +1,7 @@
 use std::{collections::HashSet, fmt::Display};
 
-use reqwest::{
-    Client,
-    header::{self, HeaderMap},
-};
-use serde::{Deserialize, Serialize};
 
-use crate::error;
+use crate::requesters::nominatim::NominatimLocationData;
 
 #[derive(Debug, Clone, Copy, uniffi::Record)]
 pub struct Coordinate {
@@ -151,98 +146,6 @@ impl GeographicCategory {
         let categories = Self::into_category(&location);
 
         Ok(categories)
-    }
-}
-
-fn build_nominatim_client() -> crate::Result<Client> {
-    const HTTP_REFERER: &str = match option_env!("IMAGE_FLOW_REFERER") {
-        Some(referer) => referer,
-        None => "https://github.com/Master-Thesis-Feedback-for-VI/image-flow",
-    };
-    const USER_AGENT: &str = match option_env!("IMAGE_FLOW_AGENT") {
-        Some(referer) => referer,
-        None => "image_flow/0.1",
-    };
-
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        header::REFERER,
-        header::HeaderValue::from_static(HTTP_REFERER),
-    );
-    headers.insert(
-        header::USER_AGENT,
-        header::HeaderValue::from_static(USER_AGENT),
-    );
-
-    let cli = Client::builder()
-        .default_headers(headers)
-        .build()
-        .map_err(error::build)?;
-
-    Ok(cli)
-}
-
-/// Fetching the raw data from nominatim.
-///
-/// # Errors
-/// TODO
-pub async fn fetch_raw_nominatim_data(coords: Coordinate) -> crate::Result<serde_json::Value> {
-    let url = format!(
-        "https://nominatim.openstreetmap.org/reverse?format=json&lat={}&lon={}&zoom=18&addressdetails=1&extratags=1&namedetails=1",
-        coords.lat, coords.lon
-    );
-
-    let client = build_nominatim_client()?;
-    let resp = client
-        .get(url)
-        .send()
-        .await
-        .map_err(error::request)?
-        .error_for_status()
-        .map_err(error::request)?
-        .json::<serde_json::Value>()
-        .await
-        .map_err(error::request)?;
-
-    Ok(resp)
-}
-
-#[allow(dead_code)]
-fn de_str_to_f64<'de, D>(deserializer: D) -> Result<f64, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let s: String = Deserialize::deserialize(deserializer)?;
-    s.parse::<f64>().map_err(serde::de::Error::custom)
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct NominatimLocationData {
-    name_map: Option<String>,
-    display_name: String,
-    osm_type: String,
-    class: String,
-    #[serde(rename = "type")]
-    location_type: String,
-
-    #[serde(deserialize_with = "de_str_to_f64")]
-    lat: f64,
-    #[serde(deserialize_with = "de_str_to_f64")]
-    lon: f64,
-}
-
-impl NominatimLocationData {
-    #[allow(dead_code)]
-    fn as_url_osm(&self) -> String {
-        let lat = self.lat;
-        let lon = self.lon;
-        format!("https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=17/{lat}/{lon}")
-    }
-
-    async fn from_cords(cords: Coordinate) -> crate::Result<Self> {
-        let data = fetch_raw_nominatim_data(cords).await?;
-        let location: Self = serde_json::from_value(data)?;
-        Ok(location)
     }
 }
 

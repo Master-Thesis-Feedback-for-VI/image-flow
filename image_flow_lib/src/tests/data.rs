@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::context_recognition::Coordinate;
 
 type NameLocation = (&'static str, Coordinate);

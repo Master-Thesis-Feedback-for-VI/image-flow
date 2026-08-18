@@ -1,11 +1,13 @@
 use std::{collections::HashMap, io::ErrorKind};
 
-use image_flow::context_recognition::{Coordinate, fetch_raw_nominatim_data};
+use image_flow::{
+    context_recognition::Coordinate, requesters::nominatim::fetch_raw_nominatim_data,
+};
 use serde_json::json;
 use tokio::fs;
 
 #[tokio::main]
-async fn main() {
+pub(crate) async fn main() {
     let places = HashMap::from([
         (
             "Karl-Wiechert-Allee",
