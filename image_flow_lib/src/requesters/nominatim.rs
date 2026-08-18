@@ -1,6 +1,10 @@
 use serde::Deserialize;
 
-use crate::{context_recognition::Coordinate, requesters::fetch_raw_data};
+use crate::{
+    context_recognition::Coordinate,
+    error,
+    requesters::client::{get_client, throttled_get},
+};
 
 /// Fetching the raw data from nominatim.
 ///
@@ -12,7 +16,17 @@ pub async fn fetch_raw_nominatim_data(coords: &Coordinate) -> crate::Result<serd
         coords.lat, coords.lon
     );
 
-    let resp = fetch_raw_data(&url).await?;
+    let resp = throttled_get(&url)
+        .await
+        .send()
+        .await
+        .map_err(error::request)?
+        .error_for_status()
+        .map_err(error::request)?
+        .json::<serde_json::Value>()
+        .await
+        .map_err(error::request)?;
+
     Ok(resp)
 }
 

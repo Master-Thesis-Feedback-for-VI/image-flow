@@ -189,7 +189,8 @@ mod tests {
         .concat();
 
         for (_name, loc) in all_locs {
-            _ = GeographicCategory::from_cords(&loc).await.unwrap();
+            let nom = NominatimLocationData::from_cords(&loc).await.unwrap();
+            _ = GeographicCategory::extract_categories_from_nominatim(&nom);
         }
     }
 
@@ -224,8 +225,8 @@ mod tests {
         let nom_data = GeographicCategory::from_cords(&element.1).await.unwrap();
         insta::assert_debug_snapshot!(nom_data, @"
         {
-            Building,
             Intersection,
+            Building,
         }
         ");
     }

@@ -1,29 +1,41 @@
-use reqwest::{Client, header};
+use reqwest::{
+    Client,
+    header::{self, HeaderMap},
+};
 use serde::Deserialize;
 use std::fmt::Write;
 
 use crate::{
     context_recognition::Coordinate,
     error,
-    requesters::{build_reqwest_client_with_default_headers, default_headers, fetch_raw_data},
+    requesters::client::{get_client, throttled_post},
 };
 
 const OVERPASS_URL: &str = "https://overpass-api.de/api/interpreter";
 const ROAD_TYPES: &str =
     "motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street";
 
-/// Fetching the raw data from nominatim.
+/// Fetching the raw data from Overpass.
 ///
 /// # Errors
 /// TODO
-pub async fn fetch_raw_nominatim_data(coords: Coordinate) -> crate::Result<serde_json::Value> {
-    let url = format!(
-        "https://nominatim.openstreetmap.org/reverse?format=json&lat={}&lon={}&zoom=18&addressdetails=1&extratags=1&namedetails=1",
-        coords.lat, coords.lon
-    );
+pub async fn fetch_raw_overpass_data(
+    coordinates: &Coordinate,
+    radius_m: f64,
+) -> crate::Result<serde_json::Value> {
+    let query = build_query(coordinates.lat, coordinates.lon, radius_m);
 
-    let resp = fetch_raw_data(&url).await?;
-    Ok(resp)
+    let response = throttled_post(OVERPASS_URL)
+        .await
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .body(format!("data={}", urlencoding_encode(&query)))
+        .send()
+        .await
+        .map_err(error::request)?
+        .error_for_status()
+        .map_err(error::request)?;
+
+    response.json().await.map_err(error::serialization)
 }
 
 #[derive(Debug, Deserialize)]
@@ -94,31 +106,9 @@ pub async fn find_nearby_intersections(
 ) -> crate::Result<Vec<Intersection>> {
     let lat = coordinates.lat;
     let lon = coordinates.lon;
-    let query = build_query(lat, lon, radius_m);
-
-    let mut headers = default_headers();
-    headers.insert(
-        header::CONTENT_TYPE,
-        header::HeaderValue::from_static("application/x-www-form-urlencoded"),
-    );
-    let cli = Client::builder()
-        .default_headers(headers)
-        .build()
-        .map_err(error::request)?;
-    let response = cli
-        .post(OVERPASS_URL)
-        .body(format!("data={}", urlencoding_encode(&query)))
-        .send()
-        .await
-        .map_err(error::request)?;
-
-    if !response.status().is_success() {
-        return Err(error::request(String::from(
-            "Failed to send request to overpass",
-        )));
-    }
-
-    let parsed: OverpassResponse = response.json().await.map_err(error::serialization)?;
+    let parsed: OverpassResponse =
+        serde_json::from_value(fetch_raw_overpass_data(coordinates, radius_m).await?)
+            .map_err(error::serialization)?;
 
     let mut intersections: Vec<Intersection> = parsed
         .elements
