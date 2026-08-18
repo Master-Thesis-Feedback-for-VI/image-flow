@@ -41,11 +41,19 @@ where
 {
     Error::new(Kind::Request, Some(e))
 }
+
 pub(crate) fn build<E>(e: E) -> Error
 where
     E: Into<BoxError>,
 {
     Error::new(Kind::Build, Some(e))
+}
+
+pub(crate) fn serialization<E>(e: E) -> Error
+where
+    E: Into<BoxError>,
+{
+    Error::new(Kind::Serialization, Some(e))
 }
 
 impl fmt::Debug for Error {
@@ -63,6 +71,6 @@ impl fmt::Debug for Error {
 
 impl From<serde_json::Error> for crate::Error {
     fn from(value: serde_json::Error) -> Self {
-        Self::new(Kind::Serialization, Some(value))
+        serialization(value)
     }
 }

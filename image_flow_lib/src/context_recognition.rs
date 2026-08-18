@@ -1,7 +1,6 @@
 use std::{collections::HashSet, fmt::Display};
 
-
-use crate::requesters::nominatim::NominatimLocationData;
+use crate::requesters::{nominatim::NominatimLocationData, overpass::find_nearby_intersections};
 
 #[derive(Debug, Clone, Copy, uniffi::Record)]
 pub struct Coordinate {
@@ -25,6 +24,16 @@ impl Display for Coordinate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "(lat = {}, lon = {})", self.lat, self.lon)
     }
+}
+
+/// TODO
+///
+/// # Errors
+/// TODO
+pub async fn evaulate_location_into_categories(
+    pos: &Coordinate,
+) -> crate::Result<HashSet<GeographicCategory>> {
+    GeographicCategory::from_cords(pos).await
 }
 
 /// [`DangerLevel`] describes how dangerouse a given context is. This is a general description with
@@ -75,7 +84,7 @@ pub enum DangerLevel {
 /// <https://github.com/Master-Thesis-Feedback-for-VI/image-flow/issues/2>
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-enum GeographicCategory {
+pub enum GeographicCategory {
     Forest,
 
     Outside,
@@ -89,7 +98,7 @@ enum GeographicCategory {
 }
 
 impl GeographicCategory {
-    fn into_category(loc_data: &NominatimLocationData) -> HashSet<Self> {
+    fn extract_categories_from_nominatim(loc_data: &NominatimLocationData) -> HashSet<Self> {
         let mut categories = HashSet::new();
         let location_type = loc_data.location_type.as_str();
         match location_type {
@@ -141,9 +150,23 @@ impl GeographicCategory {
         categories
     }
 
-    pub async fn from_cords(coordinates: Coordinate) -> crate::Result<HashSet<Self>> {
+    async fn extract_intersection_from_overpass(coordinates: &Coordinate) -> crate::Result<bool> {
+        let intersections = find_nearby_intersections(coordinates, 50.).await?;
+
+        Ok(!intersections.is_empty())
+    }
+
+    /// TODO
+    ///
+    /// # Errors
+    /// TODO
+    pub async fn from_cords(coordinates: &Coordinate) -> crate::Result<HashSet<Self>> {
         let location = NominatimLocationData::from_cords(coordinates).await?;
-        let categories = Self::into_category(&location);
+        let mut categories = Self::extract_categories_from_nominatim(&location);
+
+        if Self::extract_intersection_from_overpass(coordinates).await? {
+            categories.insert(Self::Intersection);
+        }
 
         Ok(categories)
     }
@@ -166,7 +189,7 @@ mod tests {
         .concat();
 
         for (_name, loc) in all_locs {
-            _ = GeographicCategory::from_cords(loc).await.unwrap();
+            _ = GeographicCategory::from_cords(&loc).await.unwrap();
         }
     }
 
@@ -184,7 +207,7 @@ mod tests {
         )
         "#);
 
-        let nom_data = NominatimLocationData::from_cords(element.1).await.unwrap();
+        let nom_data = NominatimLocationData::from_cords(&element.1).await.unwrap();
         insta::assert_debug_snapshot!(nom_data, @r#"
         NominatimLocationData {
             name_map: None,
@@ -198,10 +221,11 @@ mod tests {
         "#);
         insta::assert_snapshot!(nom_data.as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3715399&mlon=9.7125486#map=17/52.3715399/9.7125486");
 
-        let nom_data = GeographicCategory::into_category(&nom_data);
+        let nom_data = GeographicCategory::from_cords(&element.1).await.unwrap();
         insta::assert_debug_snapshot!(nom_data, @"
         {
             Building,
+            Intersection,
         }
         ");
     }
@@ -220,7 +244,7 @@ mod tests {
         )
         "#);
 
-        let nom_data = NominatimLocationData::from_cords(element.1).await.unwrap();
+        let nom_data = NominatimLocationData::from_cords(&element.1).await.unwrap();
         insta::assert_debug_snapshot!(nom_data, @r#"
         NominatimLocationData {
             name_map: None,
@@ -234,7 +258,7 @@ mod tests {
         "#);
         insta::assert_snapshot!(nom_data.as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3860214&mlon=9.8088121#map=17/52.3860214/9.8088121");
 
-        let nom_data = GeographicCategory::into_category(&nom_data);
+        let nom_data = GeographicCategory::extract_categories_from_nominatim(&nom_data);
         insta::assert_debug_snapshot!(nom_data, @"
         {
             Street,
