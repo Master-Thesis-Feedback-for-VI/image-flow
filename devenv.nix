@@ -11,6 +11,7 @@
     cargo-ndk
     openssl
     pkg-config
+    ffmpeg
   ];
 
   languages = {

@@ -38,6 +38,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 uniffi.workspace = true
 ultralytics-inference = "0.0"
+ffmpeg-next = "9.0"
 
 [dev-dependencies]
 insta = "1.48"
