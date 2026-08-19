@@ -1,7 +1,7 @@
 use reqwest::header::{self};
 use serde::Deserialize;
 use std::{collections::HashSet, fmt::Write, sync::LazyLock};
-use tokio::time::{Duration, sleep};
+use tokio::time::Duration;
 
 use crate::{context_recognition::Coordinate, error, requesters::client::throttled_post};
 
@@ -17,7 +17,6 @@ static OVERPASS_URLS: LazyLock<&[&str]> = LazyLock::new(|| {
         "https://z.overpass-api.de/api/interpreter",
     ]
 });
-const RETRY_DELAY: Duration = Duration::from_millis(500);
 const OVERPASS_TIMEOUT: Duration = Duration::from_secs(10);
 const ROAD_TYPES: &str =
     "motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street";
