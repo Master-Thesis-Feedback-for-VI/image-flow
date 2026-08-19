@@ -17,13 +17,9 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 insta.opt-level = 3
 similar.opt-level = 3
 
-[[example]]
-name = "filter_feed"
-path = "../examples/filter_feed.rs"
-
 [[bin]]
 name = "fetch_json_locations"
-path = "./src/scripts/fetch_json_locations.rs"
+path = "../scripts/fetch_json_locations.rs"
 
 [dependencies]
 # chrono = "0.4"
