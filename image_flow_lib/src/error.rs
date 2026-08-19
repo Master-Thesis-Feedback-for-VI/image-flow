@@ -17,6 +17,7 @@ struct Inner {
 pub(crate) enum Kind {
     Request,
     Serialization,
+    Ffmpeg,
 }
 
 #[allow(clippy::use_self)]
@@ -48,6 +49,13 @@ where
     Error::new(Kind::Serialization, Some(e))
 }
 
+pub(crate) fn ffmpeg<E>(e: E) -> Error
+where
+    E: Into<BoxError>,
+{
+    Error::new(Kind::Ffmpeg, Some(e))
+}
+
 impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut builder = f.debug_struct("image_flow::Error");
@@ -64,5 +72,11 @@ impl fmt::Debug for Error {
 impl From<serde_json::Error> for crate::Error {
     fn from(value: serde_json::Error) -> Self {
         serialization(value)
+    }
+}
+
+impl From<ffmpeg::Error> for crate::Error {
+    fn from(value: ffmpeg::Error) -> Self {
+        error::ffmpeg(value)
     }
 }
