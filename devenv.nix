@@ -12,6 +12,7 @@
     openssl
     pkg-config
     ffmpeg
+    nasm
   ];
 
   languages = {

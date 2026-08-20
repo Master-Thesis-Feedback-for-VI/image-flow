@@ -17,16 +17,23 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 name = "fetch_json_locations"
 path = "../scripts/fetch_json_locations.rs"
 
+[[bin]]
+name = "extract_images"
+path = "../scripts/extract_images.rs"
+required-features = ["video"]
+
 [features]
-default = []
-video = ["dep:ffmpeg-sys-next"]
+default = ["video"]
+video = ["dep:ffmpeg-next", "dep:image"]
 
 [dependencies]
 # chrono = "0.4"
 # opencv = { version = "0.100", features = ["clang-runtime"] }
 # toml = { version = "1.1", features = ["serde"] }
 # uuid = { version = "1.24", features = ["v7", "serde"] }
-ffmpeg-sys-next = { version = "9", features = ["build"], optional = true }
+# ffmpeg-next = { version = "9", features = ["build"], optional = true }
+ffmpeg-next = { version = "9", optional = true }
+image = { version = "0.25", optional = true }
 reqwest = { version = "0.13", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -38,6 +45,8 @@ ultralytics-inference = { version = "0.0", default-features = false, features = 
   "annotate",
 ] }
 uniffi.workspace = true
+tokio-stream = "0.1"
+futures = "0.3"
 
 [dev-dependencies]
 insta = "1.48"
