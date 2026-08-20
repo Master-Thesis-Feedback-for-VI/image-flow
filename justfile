@@ -1,16 +1,25 @@
-androidTargets := "aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android"
-iosTargets := "aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios"
+androidTargets := "aarch64-linux-android"
+iosTargets := "aarch64-apple-ios aarch64-apple-ios-sim"
 targets := androidTargets + " " + iosTargets
+
+# Android API level passed to cargo-ndk (-p)
+ndkPlatform := "30"
 
 default: build-release-all
 
 [group('tool-chain')]
 install-toolchains:
     rustup target add {{targets}}
-    
+    # cargo install cargo-ndk
+
 [group('build')]
 build target:
-    cargo build --target {{target}} --release
+    # IPHONEOS_DEPLOYMENT_TARGET=15.0 cargo build --target {{target}} --release --lib
+    cargo build --target {{target}} --release --lib
+
+[group('build')]
+build-android target:
+    cargo ndk -t {{target}} -P {{ndkPlatform}} build --release --lib
 
 [group('build')]
 build-multiple target_multiple:
@@ -19,8 +28,14 @@ build-multiple target_multiple:
     done
 
 [group('build')]
+build-multiple-android target_multiple:
+    for target in {{target_multiple}}; do \
+        just build-android $target; \
+    done
+
+[group('build')]
 build-unix:
-    just build-multiple '{{androidTargets}}'
+    just build-multiple-android '{{androidTargets}}'
 
 [group('build')]
 [macos]
@@ -51,7 +66,7 @@ create-bindings-swift:
 create-bindings-kotlin:
     lang="kotlin"
     aarch="aarch64-linux-android"
-    just build "$aarch"
+    just build-android "$aarch"
     mkdir -p "./bindings/$lang"
     rm -rf ./bindings/$lang/*
     cargo run -p uniffi-bindgen-runner -- generate \
@@ -65,11 +80,7 @@ create-bindings-kotlin:
 swift-build-xcode-bindings: build-mac create-bindings-swift
     mkdir -p target/ios-universal-sim/release
     rm -rf target/ios-universal-sim/release/*
-
-    lipo -create \
-        target/aarch64-apple-ios-sim/release/libimage_flow.a \
-        target/x86_64-apple-ios/release/libimage_flow.a \
-        -output target/ios-universal-sim/release/libimage_flow.a
+    cp target/aarch64-apple-ios-sim/release/libimage_flow.a target/ios-universal-sim/release/libimage_flow.a
 
     rm -rf ios/Mobile.xcframework
 
@@ -87,3 +98,4 @@ create-bindings-all: create-bindings-swift create-bindings-kotlin
 clean:
     cargo clean
     rm -rf ./.android ./bindings
+

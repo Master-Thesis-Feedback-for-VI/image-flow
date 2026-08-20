@@ -4,6 +4,7 @@
 pub mod context_recognition;
 pub mod error;
 pub mod requesters;
+#[cfg(feature = "video")]
 pub mod video_slicer;
 
 pub use error::{Error, Result};

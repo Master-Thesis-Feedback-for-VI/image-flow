@@ -1,4 +1,4 @@
-use std::{error::Error as StdError, fmt};
+use std::{error::Error as StdError, fmt, io};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -17,6 +17,9 @@ struct Inner {
 pub(crate) enum Kind {
     Request,
     Serialization,
+    Io,
+
+    #[cfg(feature = "video")]
     Ffmpeg,
 }
 
@@ -49,11 +52,19 @@ where
     Error::new(Kind::Serialization, Some(e))
 }
 
+#[cfg(feature = "video")]
 pub(crate) fn ffmpeg<E>(e: E) -> Error
 where
     E: Into<BoxError>,
 {
     Error::new(Kind::Ffmpeg, Some(e))
+}
+
+pub(crate) fn io<E>(e: E) -> Error
+where
+    E: Into<BoxError>,
+{
+    Error::new(Kind::Io, Some(e))
 }
 
 impl fmt::Debug for Error {
@@ -75,8 +86,15 @@ impl From<serde_json::Error> for crate::Error {
     }
 }
 
-impl From<ffmpeg::Error> for crate::Error {
-    fn from(value: ffmpeg::Error) -> Self {
-        error::ffmpeg(value)
+#[cfg(feature = "video")]
+impl From<ffmpeg_next::Error> for crate::Error {
+    fn from(value: ffmpeg_next::Error) -> Self {
+        ffmpeg(value)
+    }
+}
+
+impl From<io::Error> for crate::Error {
+    fn from(value: io::Error) -> Self {
+        io(value)
     }
 }

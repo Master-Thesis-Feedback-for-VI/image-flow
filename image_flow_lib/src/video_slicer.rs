@@ -9,12 +9,14 @@ use ffmpeg_next::{
 use tempfile::{tempdir, tempfile};
 use tokio::{fs::create_dir_all, sync::OnceCell};
 
+use crate::error;
+
 static ONCE: OnceCell<bool> = OnceCell::const_new();
 const DIR_FRAMES: &str = "frames";
 
-pub async fn set_fps_from_video<P: AsRef<Path> + Send + 'static>(
+pub(crate) async fn set_fps_from_video<P: AsRef<Path> + Send + 'static>(
     path: P,
-    fps: usize,
+    _fps: usize,
 ) -> crate::Result<File> {
     let _ = ONCE
         .get_or_init(|| async {
@@ -53,5 +55,5 @@ pub async fn set_fps_from_video<P: AsRef<Path> + Send + 'static>(
         Ok(f)
     });
 
-    handle.await?
+    handle.await.map_err(error::ffmpeg)?
 }
