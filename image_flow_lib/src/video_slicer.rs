@@ -16,38 +16,58 @@ use tokio::{
     sync::{OnceCell, mpsc},
 };
 use tokio_stream::{Stream, wrappers::ReceiverStream};
-
-use crate::error;
+use tracing::{debug, error, info, instrument, trace, warn};
 
 static ONCE: OnceCell<bool> = OnceCell::const_new();
-const DIR_FRAMES: &str = "frames";
 
-pub(crate) fn export_images_from_video<P>(
-    video_source_path: P,
+#[derive(Debug)]
+pub struct FramePath {
+    path: PathBuf,
+
+    should_drop: bool,
+}
+
+impl Drop for FramePath {
+    fn drop(&mut self) {
+        if self.should_drop {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+#[instrument(skip(video_source_path, temporary_storage), fields(video_path = %video_source_path.as_ref().display()))]
+pub(crate) fn export_images_from_video(
+    video_source_path: impl AsRef<Path>,
     temporary_storage: impl AsRef<Path>,
-) -> impl Stream<Item = crate::Result<PathBuf>>
-where
-    P: AsRef<Path> + Send + 'static,
-{
-    let (tx, rx) = mpsc::channel::<crate::Result<PathBuf>>(8);
+) -> impl Stream<Item = crate::Result<FramePath>> {
+    let (tx, rx) = mpsc::channel::<crate::Result<FramePath>>(16);
 
     let temporary_storage = temporary_storage.as_ref().to_path_buf();
+    let video_source_path = video_source_path.as_ref().to_path_buf();
     tokio::spawn(async move {
         ONCE.get_or_init(|| async {
+            info!("init ffmpeg");
             ffmpeg::init().expect("Ffmpeg could not init");
             true
         })
         .await;
 
-        let relative_dir_storage_path = temporary_storage.join(DIR_FRAMES);
-        if let Err(e) = fs::create_dir_all(&relative_dir_storage_path).await {
+        let temp_storage_disp = temporary_storage.display();
+        debug!(dir = %temp_storage_disp, "ensuring frames directory exists");
+        if let Err(e) = fs::create_dir_all(&temporary_storage).await {
+            error!(error = %e, dir = %temp_storage_disp, "failed to create frames directory");
             let _ = tx.send(Err(e.into())).await;
             return;
         }
 
+        let video_path_display = video_source_path.display().to_string();
         tokio::task::spawn_blocking(move || {
-            if let Err(e) = decode_and_send(&video_source_path, &relative_dir_storage_path, &tx) {
+            info!(video_path = %video_path_display, "starting blocking decode task");
+            if let Err(e) = decode_and_send(&video_source_path, &temporary_storage, &tx) {
+                error!(error = ?e, video_path = %video_path_display, "decode_and_send failed");
                 let _ = tx.blocking_send(Err(e));
+            } else {
+                info!(video_path = %video_path_display, "decode_and_send completed successfully");
             }
         });
     });
@@ -55,10 +75,11 @@ where
     ReceiverStream::new(rx)
 }
 
+#[instrument(skip(video_source_path, relative_dir_storage_path, tx))]
 fn decode_and_send(
     video_source_path: impl AsRef<Path>,
     relative_dir_storage_path: impl AsRef<Path>,
-    tx: &mpsc::Sender<crate::Result<PathBuf>>,
+    tx: &mpsc::Sender<crate::Result<FramePath>>,
 ) -> crate::Result<()> {
     let mut ictx = format::input(&video_source_path)?;
     let input_stream = ictx
@@ -68,8 +89,22 @@ fn decode_and_send(
     let video_stream_index = input_stream.index();
     let time_base = input_stream.time_base();
 
+    debug!(
+        video_stream_index,
+        time_base_num = time_base.numerator(),
+        time_base_den = time_base.denominator(),
+        "resolved best video stream"
+    );
+
     let context_decoder = codec::Context::from_parameters(input_stream.parameters())?;
     let mut decoder = context_decoder.decoder().video()?;
+
+    info!(
+        width = decoder.width(),
+        height = decoder.height(),
+        format = ?decoder.format(),
+        "video decoder created"
+    );
 
     let mut scaler = scaling::context::Context::get(
         decoder.format(),
@@ -88,6 +123,8 @@ fn decode_and_send(
             let mut video_decoded = Video::empty();
             while decoder.receive_frame(&mut video_decoded).is_ok() {
                 if let Some(pts) = video_decoded.pts() {
+                    trace!(pts, next_second_to_capture, "capturing frame at pts");
+
                     let lhs = pts * i64::from(time_base.numerator());
                     let rhs = next_second_to_capture * i64::from(time_base.denominator());
                     if lhs >= rhs {
@@ -97,10 +134,22 @@ fn decode_and_send(
                         let frame_path = relative_dir_storage_path
                             .as_ref()
                             .join(format!("{next_second_to_capture:05}s.png"));
-                        let _ = save_png(&rgb_frame, &frame_path);
+                        let frame_path_disp = frame_path.clone();
+                        let frame_path_disp = frame_path_disp.display();
+
+                        if let Err(e) = save_png(&rgb_frame, &frame_path) {
+                            warn!(error = ?e, path = %frame_path.display(), "failed to save frame png");
+                        } else {
+                            debug!(path = %frame_path_disp, "frame saved");
+                        }
 
                         // Stop decoding early if the receiver was dropped.
-                        if tx.blocking_send(Ok(frame_path)).is_err() {
+                        let tmp_frame_path = FramePath {
+                            path: frame_path,
+                            should_drop: true,
+                        };
+                        if tx.blocking_send(Ok(tmp_frame_path)).is_err() {
+                            warn!(path = %frame_path_disp, "receiver dropped, stopping decode early");
                             return Ok(());
                         }
 
@@ -111,14 +160,23 @@ fn decode_and_send(
             Ok(())
         };
 
+    let mut packets_for_stream = 0u64;
     for (stream, packet) in ictx.packets() {
         if stream.index() == video_stream_index {
+            packets_for_stream += 1;
             decoder.send_packet(&packet)?;
             receive_and_process_decoded_frames(&mut decoder)?;
         }
     }
+    debug!(packets_for_stream, "finished feeding packets, sending EOF");
+
     decoder.send_eof()?;
     receive_and_process_decoded_frames(&mut decoder)?;
+
+    info!(
+        frames_captured = next_second_to_capture,
+        "decoding finished"
+    );
 
     Ok(())
 }
@@ -131,7 +189,7 @@ fn save_png(frame: &Video, path: impl AsRef<Path>) -> crate::Result<()> {
         frame.height(),
         ColorType::Rgb8,
     )
-    .map_err(error::ffmpeg)
+    .map_err(crate::error::ffmpeg)
 }
 
 struct VideoMetadata {
@@ -154,9 +212,11 @@ impl VideoMetadata {
         tokio::task::spawn_blocking(move || -> crate::Result<Self> {
             let file_name = path
                 .file_name()
-                .ok_or_else(|| error::io(String::from("no file name found")))?
+                .ok_or_else(|| crate::error::io(String::from("no file name found")))?
                 .to_str()
-                .ok_or_else(|| error::io(String::from("file name has unsupported encoding")))?
+                .ok_or_else(|| {
+                    crate::error::io(String::from("file name has unsupported encoding"))
+                })?
                 .to_owned();
 
             let ictx = format::input(&path)?;
@@ -170,64 +230,71 @@ impl VideoMetadata {
             })
         })
         .await
-        .map_err(error::ffmpeg)?
+        .map_err(crate::error::ffmpeg)?
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use futures::{
-        StreamExt,
-        executor::{block_on, block_on_stream},
+    use std::{path::Path, time::Duration};
+
+    use futures::StreamExt;
+    use tokio::fs;
+
+    use crate::{
+        tests::video::SAMPLE_VIDEO_SOURCES,
+        video_slicer::{VideoMetadata, export_images_from_video},
     };
 
-    use crate::tests::video::SAMPLE_VIDEO_SOURCES;
+    const ACCEPTED_DUR: Duration = Duration::from_secs(1);
 
-    use super::*;
+    async fn check_video(src: &str) -> Result<(), String> {
+        let video_metadata = VideoMetadata::open(src)
+            .await
+            .map_err(|e| format!("failed to open {src}: {e:#?}"))?;
+
+        let file_stem = Path::new(&video_metadata.name)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| format!("invalid file stem for {}", video_metadata.name))?;
+
+        let dir = Path::new("..")
+            .join("out")
+            .join(format!("video-{file_stem}"));
+
+        if dir.exists() {
+            fs::remove_dir_all(&dir).await.ok(); // best-effort cleanup
+        }
+        fs::create_dir_all(&dir).await.map_err(|e| e.to_string())?;
+
+        let seconds = export_images_from_video(src, &dir)
+            .fold(0u64, |acc, frame| async move {
+                if let Ok(mut frame) = frame {
+                    frame.should_drop = false;
+                }
+                acc + 1
+            })
+            .await as u64;
+        let diff = Duration::from_secs(seconds).abs_diff(video_metadata.duration);
+
+        if diff > ACCEPTED_DUR {
+            return Err(format!(
+                "{}: expected ~{:?}, got diff {:?}",
+                video_metadata.name, video_metadata.duration, seconds
+            ));
+        }
+        Ok(())
+    }
 
     #[tokio::test]
     async fn fetch_images() {
-        let futures = SAMPLE_VIDEO_SOURCES.iter().map(|&src| async move {
-            let video_metadata = VideoMetadata::open(src).await.unwrap();
-            let file_stem = Path::new(&video_metadata.name)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap();
-            let dir = Path::new("..")
-                .join("out")
-                .join(format!("video-{file_stem}"));
-            let frames_dir = dir.join(DIR_FRAMES);
+        let errors: Vec<String> =
+            futures::future::join_all(SAMPLE_VIDEO_SOURCES.iter().map(|&src| check_video(src)))
+                .await
+                .into_iter()
+                .filter_map(Result::err)
+                .collect();
 
-            if !dir.exists() {
-                fs::create_dir_all(&dir).await.unwrap();
-            }
-            if frames_dir.exists() {
-                fs::remove_dir_all(&frames_dir).await.unwrap_or_else(|e| {
-                    panic!(
-                        "could not find dir '{}' with failure: {e:#?}",
-                        frames_dir.canonicalize().unwrap().to_str().unwrap()
-                    )
-                });
-            }
-
-            let mut images = export_images_from_video(src, &dir);
-
-            let mut seconds = 0u64;
-            while let Some(_image) = images.next().await {
-                seconds += 1;
-            }
-            let seconds_duration = Duration::from_secs(seconds);
-
-            let diff = seconds_duration.abs_diff(video_metadata.duration);
-            let accepted_dur = Duration::from_secs(7);
-            assert!(
-                diff <= accepted_dur,
-                "file diff not working: {} with time diff: {:?}",
-                video_metadata.name,
-                video_metadata.duration
-            );
-        });
-
-        let _res = futures::future::join_all(futures).await;
+        assert!(errors.is_empty(), "failures:\n{}", errors.join("\n"));
     }
 }

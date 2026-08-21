@@ -8,6 +8,7 @@ pub struct Error {
 
 pub(crate) type BoxError = Box<dyn StdError + Send + Sync>;
 
+#[derive(Debug)]
 struct Inner {
     kind: Kind,
     source: Option<BoxError>,
