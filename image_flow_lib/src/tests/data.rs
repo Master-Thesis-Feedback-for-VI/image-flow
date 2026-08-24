@@ -1,4 +1,4 @@
-use crate::context_recognition::Coordinate;
+use crate::location::coordinate_system::Coordinate;
 
 type NameLocation = (&'static str, Coordinate);
 

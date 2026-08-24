@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::{context_recognition::Coordinate, error, requesters::client::throttled_get};
+use crate::{error, location::coordinate_system::Coordinate, requesters::client::throttled_get};
 
 /// Fetching the raw data from nominatim.
 ///

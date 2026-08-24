@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::{collections::HashSet, fmt::Write, sync::LazyLock};
 use tokio::time::Duration;
 
-use crate::{context_recognition::Coordinate, error, requesters::client::throttled_post};
+use crate::{error, location::coordinate_system::Coordinate, requesters::client::throttled_post};
 
 // ===== Configuration =====
 

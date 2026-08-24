@@ -1,7 +1,7 @@
 use std::{collections::HashMap, io::ErrorKind};
 
 use image_flow::{
-    context_recognition::Coordinate, requesters::nominatim::fetch_raw_nominatim_data,
+    location::coordinate_system::Coordinate, requesters::nominatim::fetch_raw_nominatim_data,
 };
 use serde_json::json;
 use tokio::fs;

@@ -18,22 +18,9 @@ use tokio::{
 use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tracing::{debug, error, info, instrument, trace, warn};
 
+use crate::FramePath;
+
 static ONCE: OnceCell<bool> = OnceCell::const_new();
-
-#[derive(Debug)]
-pub struct FramePath {
-    path: PathBuf,
-
-    should_drop: bool,
-}
-
-impl Drop for FramePath {
-    fn drop(&mut self) {
-        if self.should_drop {
-            let _ = std::fs::remove_file(&self.path);
-        }
-    }
-}
 
 #[instrument(skip(video_source_path, temporary_storage), fields(video_path = %video_source_path.as_ref().display()))]
 pub(crate) fn export_images_from_video(

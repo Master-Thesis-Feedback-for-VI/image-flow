@@ -1,41 +1,12 @@
-use std::{collections::HashSet, fmt::Display};
+use std::collections::HashSet;
 
-use crate::requesters::{nominatim::NominatimLocationData, overpass::find_nearby_intersections};
+use crate::{
+    context::ContextCategory,
+    location::coordinate_system::Coordinate,
+    requesters::{nominatim::NominatimLocationData, overpass::find_nearby_intersections},
+};
 
 const MIN_INTERSECTION_NODES: usize = 2;
-
-#[derive(Debug, Clone, Copy, uniffi::Record)]
-pub struct Coordinate {
-    pub lat: f64,
-    pub lon: f64,
-}
-
-impl Coordinate {
-    /// This is pure for Debugging purposes
-    #[allow(dead_code)]
-    #[must_use]
-    pub fn print_location_url(self) -> String {
-        format!(
-            "https://www.openstreetmap.org/?mlat={}&mlon={}#map=16/{}/{}",
-            self.lat, self.lon, self.lat, self.lon
-        )
-    }
-}
-
-impl Coordinate {
-    #[allow(dead_code)]
-    pub(crate) fn as_url_osm(&self) -> String {
-        let lat = self.lat;
-        let lon = self.lon;
-        format!("https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=17/{lat}/{lon}")
-    }
-}
-
-impl Display for Coordinate {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(lat = {}, lon = {})", self.lat, self.lon)
-    }
-}
 
 /// TODO
 ///
@@ -44,30 +15,12 @@ impl Display for Coordinate {
 pub async fn evaulate_location_into_categories<T: Into<Coordinate>>(
     pos: T,
 ) -> crate::Result<UniqueGeographicCategories> {
-    GeographicCategory::from_cords(pos).await
+    ContextCategory::from_cords(pos).await
 }
 
-/// All potential geographic categories supported.
-///
-/// <https://github.com/Master-Thesis-Feedback-for-VI/image-flow/issues/2>
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub enum GeographicCategory {
-    Forest,
+pub type UniqueGeographicCategories = HashSet<ContextCategory>;
 
-    Outside,
-    Building,
-
-    Street,
-    Pedestrian,
-    Intersection,
-
-    Elevator,
-}
-
-pub type UniqueGeographicCategories = HashSet<GeographicCategory>;
-
-impl GeographicCategory {
+impl ContextCategory {
     async fn extract_categories_from_nominatim<T: Into<Coordinate>>(
         coordinates: T,
     ) -> crate::Result<UniqueGeographicCategories> {
@@ -157,7 +110,9 @@ impl GeographicCategory {
 #[cfg(test)]
 mod tests {
     use crate::{
-        context_recognition::{Coordinate, GeographicCategory, NominatimLocationData},
+        context::ContextCategory,
+        location::coordinate_system::Coordinate,
+        requesters::nominatim::NominatimLocationData,
         tests::data::{self, INTERSECTION_LOCATIONS},
     };
 
@@ -171,7 +126,7 @@ mod tests {
         .concat();
 
         for (_name, loc) in all_locs {
-            _ = GeographicCategory::extract_categories_from_nominatim(loc)
+            _ = ContextCategory::extract_categories_from_nominatim(loc)
                 .await
                 .unwrap();
         }
@@ -205,8 +160,8 @@ mod tests {
         "#);
         insta::assert_snapshot!(&nom_data.as_coordinate().as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3715399&mlon=9.7125486#map=17/52.3715399/9.7125486");
 
-        let categories = GeographicCategory::from_cords(element.1).await.unwrap();
-        let mut vec_categories: Vec<GeographicCategory> = categories.into_iter().collect();
+        let categories = ContextCategory::from_cords(element.1).await.unwrap();
+        let mut vec_categories: Vec<ContextCategory> = categories.into_iter().collect();
         vec_categories.sort();
         insta::assert_debug_snapshot!(vec_categories, @"
         [
@@ -244,8 +199,8 @@ mod tests {
         "#);
         insta::assert_snapshot!(&nom_data.as_coordinate().as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3860214&mlon=9.8088121#map=17/52.3860214/9.8088121");
 
-        let categories = GeographicCategory::from_cords(element.1).await.unwrap();
-        let mut vec_categories: Vec<GeographicCategory> = categories.into_iter().collect();
+        let categories = ContextCategory::from_cords(element.1).await.unwrap();
+        let mut vec_categories: Vec<ContextCategory> = categories.into_iter().collect();
         vec_categories.sort();
         insta::assert_debug_snapshot!(vec_categories, @"
         [
@@ -259,13 +214,13 @@ mod tests {
     async fn intersections() {
         let intersection_locations = INTERSECTION_LOCATIONS;
         for (name, location) in intersection_locations {
-            let categories = GeographicCategory::extract_categories_from_overpass(*location)
+            let categories = ContextCategory::extract_categories_from_overpass(*location)
                 .await
                 .unwrap();
 
             let url = location.as_url_osm();
             assert!(
-                categories.contains(&GeographicCategory::Intersection),
+                categories.contains(&ContextCategory::Intersection),
                 "Location: {name} does not have a intersection although it should. Check out this url to inspect the location: {url}"
             );
         }
@@ -277,14 +232,14 @@ mod tests {
                 lon: 9.781_501,
             },
         );
-        let categories = GeographicCategory::extract_categories_from_overpass(no_intersection.1)
+        let categories = ContextCategory::extract_categories_from_overpass(no_intersection.1)
             .await
             .unwrap();
 
         let name = no_intersection.0;
         let url = no_intersection.1.as_url_osm();
         assert!(
-            !categories.contains(&GeographicCategory::Intersection),
+            !categories.contains(&ContextCategory::Intersection),
             "Location: {name} does not have a intersection although it should. Check out this url to inspect the location: {url}"
         );
     }
