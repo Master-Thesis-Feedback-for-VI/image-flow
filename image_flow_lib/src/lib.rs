@@ -5,6 +5,8 @@ pub mod error;
 
 pub use error::{Error, Result};
 
+pub mod danger;
+pub mod location;
 pub mod requesters;
 
 #[cfg(test)]
