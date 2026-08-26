@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::{context_recognition::Coordinate, error, requesters::client::throttled_get};
+use crate::{error, location::coordinate_system::Coordinate, requesters::client::throttled_get};
 
 /// Fetching the raw data from nominatim.
 ///
@@ -35,7 +35,8 @@ where
     D: serde::Deserializer<'de>,
 {
     let s: String = Deserialize::deserialize(deserializer)?;
-    s.parse::<f64>().map_err(serde::de::Error::custom)
+    s.parse::<f64>()
+        .map_err(serde::de::Error::custom)
 }
 
 #[derive(Debug, Clone, Deserialize)]
