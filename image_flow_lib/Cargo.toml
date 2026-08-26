@@ -26,10 +26,6 @@ required-features = ["video"]
 default = ["video"]
 video = ["dep:ffmpeg-next", "dep:image"]
 
-[[bin]]
-name = "fetch_json_locations"
-path = "./src/scripts/fetch_json_locations.rs"
-
 [dependencies]
 # ffmpeg-next = { version = "9", features = ["build"], optional = true }
 # opencv = { version = "0.100", features = ["clang-runtime"] }
