@@ -1,7 +1,4 @@
-use std::{
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{path::Path, time::Duration};
 
 use ffmpeg_next::{
     self as ffmpeg, codec, decoder,
@@ -20,7 +17,8 @@ use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
-    FramePath, location::coordinate_system::Coordinate, location::tabular_gps::TabularGPS,
+    FramePath,
+    location::{coordinate_system::Coordinate, tabular_gps::DataPointsGPS},
 };
 
 static ONCE: OnceCell<bool> = OnceCell::const_new();
@@ -34,13 +32,21 @@ impl ImageGPSZip {
     /// TODO
     pub async fn from_video_and_gps(
         video_path: impl AsRef<Path>,
-        tabular_data: TabularGPS,
+        tabular_data: &DataPointsGPS,
         storage_path: impl AsRef<Path>,
+        capture_interval: Duration,
     ) -> crate::Result<Self> {
-        let mut images = export_images_from_video(video_path, storage_path);
+        let mut images = export_images_from_video(video_path, storage_path, capture_interval);
+        let gps_data = tabular_data.fetch_every(
+            chrono::Duration::milliseconds(capture_interval.as_millis() as _),
+            chrono::Duration::milliseconds(800),
+        );
 
         let mut frame_paths = Vec::new();
-        while let Some(frame) = images.next().await {
+        while let Some(frame) = images
+            .next()
+            .await
+        {
             let frame = frame?;
 
             frame_paths.push((Coordinate { lat: 0., lon: 0. }, frame));
@@ -59,11 +65,16 @@ impl ImageGPSZip {
 pub fn export_images_from_video(
     video_source_path: impl AsRef<Path>,
     temporary_storage: impl AsRef<Path>,
+    capture_interval: Duration,
 ) -> impl Stream<Item = crate::Result<FramePath>> {
     let (tx, rx) = mpsc::channel::<crate::Result<FramePath>>(16);
 
-    let temporary_storage = temporary_storage.as_ref().to_path_buf();
-    let video_source_path = video_source_path.as_ref().to_path_buf();
+    let temporary_storage = temporary_storage
+        .as_ref()
+        .to_path_buf();
+    let video_source_path = video_source_path
+        .as_ref()
+        .to_path_buf();
     tokio::spawn(async move {
         ONCE.get_or_init(|| async {
             info!("init ffmpeg");
@@ -76,14 +87,23 @@ pub fn export_images_from_video(
         debug!(dir = %temp_storage_disp, "ensuring frames directory exists");
         if let Err(e) = fs::create_dir_all(&temporary_storage).await {
             error!(error = %e, dir = %temp_storage_disp, "failed to create frames directory");
-            let _ = tx.send(Err(e.into())).await;
+            let _ = tx
+                .send(Err(e.into()))
+                .await;
             return;
         }
 
-        let video_path_display = video_source_path.display().to_string();
+        let video_path_display = video_source_path
+            .display()
+            .to_string();
         tokio::task::spawn_blocking(move || {
             info!(video_path = %video_path_display, "starting blocking decode task");
-            if let Err(e) = decode_and_send(&video_source_path, &temporary_storage, &tx) {
+            if let Err(e) = decode_and_send(
+                &video_source_path,
+                &temporary_storage,
+                &tx,
+                capture_interval,
+            ) {
                 error!(error = ?e, video_path = %video_path_display, "decode_and_send failed");
                 let _ = tx.blocking_send(Err(e));
             } else {
@@ -100,6 +120,7 @@ fn decode_and_send(
     video_source_path: impl AsRef<Path>,
     relative_dir_storage_path: impl AsRef<Path>,
     tx: &mpsc::Sender<crate::Result<FramePath>>,
+    capture_interval: Duration,
 ) -> crate::Result<()> {
     let mut ictx = format::input(&video_source_path)?;
     let input_stream = ictx
@@ -117,7 +138,9 @@ fn decode_and_send(
     );
 
     let context_decoder = codec::Context::from_parameters(input_stream.parameters())?;
-    let mut decoder = context_decoder.decoder().video()?;
+    let mut decoder = context_decoder
+        .decoder()
+        .video()?;
 
     info!(
         width = decoder.width(),
@@ -136,24 +159,28 @@ fn decode_and_send(
         Flags::BILINEAR,
     )?;
 
-    let mut next_second_to_capture = 0i64;
+    let mut next_capture_time = Duration::new(0, 0);
+    let mut frames_captured = 0u64;
 
     let mut receive_and_process_decoded_frames =
         |decoder: &mut decoder::Video| -> crate::Result<()> {
             let mut video_decoded = Video::empty();
-            while decoder.receive_frame(&mut video_decoded).is_ok() {
+            while decoder
+                .receive_frame(&mut video_decoded)
+                .is_ok()
+            {
                 if let Some(pts) = video_decoded.pts() {
-                    trace!(pts, next_second_to_capture, "capturing frame at pts");
+                    let current_pts_time = pts_to_duration(pts, time_base);
 
-                    let lhs = pts * i64::from(time_base.numerator());
-                    let rhs = next_second_to_capture * i64::from(time_base.denominator());
-                    if lhs >= rhs {
+                    trace!(pts, ?next_capture_time, "capturing frame at pts");
+
+                    if current_pts_time >= next_capture_time {
                         let mut rgb_frame = Video::empty();
                         scaler.run(&video_decoded, &mut rgb_frame)?;
 
                         let frame_path = relative_dir_storage_path
                             .as_ref()
-                            .join(format!("{next_second_to_capture:05}s.png"));
+                            .join(format!("{:05}s.png", next_capture_time.as_millis()));
                         let frame_path_disp = frame_path.clone();
                         let frame_path_disp = frame_path_disp.display();
 
@@ -168,12 +195,16 @@ fn decode_and_send(
                             path: frame_path,
                             should_drop: true,
                         };
-                        if tx.blocking_send(Ok(tmp_frame_path)).is_err() {
+                        if tx
+                            .blocking_send(Ok(tmp_frame_path))
+                            .is_err()
+                        {
                             warn!(path = %frame_path_disp, "receiver dropped, stopping decode early");
                             return Ok(());
                         }
 
-                        next_second_to_capture += 1;
+                        frames_captured += 1;
+                        next_capture_time += capture_interval;
                     }
                 }
             }
@@ -193,12 +224,16 @@ fn decode_and_send(
     decoder.send_eof()?;
     receive_and_process_decoded_frames(&mut decoder)?;
 
-    info!(
-        frames_captured = next_second_to_capture,
-        "decoding finished"
-    );
+    info!(frames_captured, "decoding finished");
 
     Ok(())
+}
+
+fn pts_to_duration(pts: i64, time_base: ffmpeg::Rational) -> Duration {
+    let num = i64::from(time_base.numerator()) as i128;
+    let den = i64::from(time_base.denominator()) as i128;
+    let nanos = (pts as i128 * num * 1_000_000_000) / den;
+    Duration::from_nanos(nanos as u64)
 }
 
 fn save_png(frame: &Video, path: impl AsRef<Path>) -> crate::Result<()> {
@@ -212,22 +247,21 @@ fn save_png(frame: &Video, path: impl AsRef<Path>) -> crate::Result<()> {
     .map_err(crate::error::ffmpeg)
 }
 
-struct VideoMetadata {
-    name: String,
-    duration: Duration,
+pub struct VideoMetadata {
+    pub name: String,
+    pub duration: Duration,
 }
 
 impl VideoMetadata {
-    #[allow(
-        clippy::cast_precision_loss,
-        clippy::cast_sign_loss,
-        clippy::cast_possible_truncation
-    )]
-    async fn open<P>(path: P) -> crate::Result<Self>
+    /// # Errors
+    /// TODO
+    pub async fn open<P>(path: P) -> crate::Result<Self>
     where
         P: AsRef<Path>,
     {
-        let path = path.as_ref().to_path_buf();
+        let path = path
+            .as_ref()
+            .to_path_buf();
 
         tokio::task::spawn_blocking(move || -> crate::Result<Self> {
             let file_name = path
@@ -267,6 +301,7 @@ mod tests {
     };
 
     const ACCEPTED_DUR: Duration = Duration::from_secs(1);
+    const CAPTURE_INTERVAL: Duration = Duration::from_secs(1);
 
     async fn check_video(src: &str) -> Result<(), String> {
         let video_metadata = VideoMetadata::open(src)
@@ -283,11 +318,15 @@ mod tests {
             .join(format!("video-{file_stem}"));
 
         if dir.exists() {
-            fs::remove_dir_all(&dir).await.ok(); // best-effort cleanup
+            fs::remove_dir_all(&dir)
+                .await
+                .ok(); // best-effort cleanup
         }
-        fs::create_dir_all(&dir).await.map_err(|e| e.to_string())?;
+        fs::create_dir_all(&dir)
+            .await
+            .map_err(|e| e.to_string())?;
 
-        let seconds = export_images_from_video(src, &dir)
+        let seconds = export_images_from_video(src, &dir, CAPTURE_INTERVAL)
             .fold(0u64, |acc, frame| async move {
                 if let Ok(mut frame) = frame {
                     frame.should_drop = false;
@@ -308,12 +347,15 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_images() {
-        let errors: Vec<String> =
-            futures::future::join_all(SAMPLE_VIDEO_SOURCES.iter().map(|&src| check_video(src)))
-                .await
-                .into_iter()
-                .filter_map(Result::err)
-                .collect();
+        let errors: Vec<String> = futures::future::join_all(
+            SAMPLE_VIDEO_SOURCES
+                .iter()
+                .map(|&src| check_video(src)),
+        )
+        .await
+        .into_iter()
+        .filter_map(Result::err)
+        .collect();
 
         assert!(errors.is_empty(), "failures:\n{}", errors.join("\n"));
     }

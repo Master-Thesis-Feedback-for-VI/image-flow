@@ -1,4 +1,10 @@
 #![feature(const_trait_impl)]
+#![allow(
+    clippy::cast_precision_loss,
+    clippy::cast_lossless,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 
 #[allow(clippy::too_long_first_doc_paragraph)]
 pub mod context;

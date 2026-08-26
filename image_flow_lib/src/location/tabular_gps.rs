@@ -41,9 +41,9 @@ impl DataPointsGPS {
     pub fn fetch(
         &self,
         offset: Duration,
-        range: Duration,
+        range_around_offset: Duration,
     ) -> impl Iterator<Item = &TabularGPS> + '_ {
-        let range = range.abs();
+        let range = range_around_offset.abs();
         self.0
             .iter()
             .filter(move |gps| {
@@ -68,6 +68,37 @@ impl DataPointsGPS {
                 lower_bound <= offset && offset <= upper_bound
             })
     }
+
+    pub fn fetch_every(
+        &self,
+        interval: Duration,
+        range_around_offset: Duration,
+    ) -> impl Iterator<Item = &TabularGPS> + '_ {
+        let last_ref = self
+            .0
+            .last()
+            .map(|gps| gps.offset);
+        let range = range_around_offset.abs();
+
+        self.0
+            .iter()
+            .filter(move |gps| {
+                let mut acc_duration = Duration::zero();
+
+                if let Some(last_gps) = last_ref {
+                    while acc_duration < last_gps {
+                        let gap = (gps.offset - acc_duration).abs();
+                        if gap < range {
+                            return true;
+                        }
+
+                        acc_duration += interval;
+                    }
+                }
+
+                false
+            })
+    }
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -88,16 +119,28 @@ where
 mod tests {
     use chrono::{Duration, TimeDelta};
 
-    use crate::{location::tabular_gps::DataPointsGPS, tests::data::GPS_FILE};
+    use crate::{
+        location::tabular_gps::{DataPointsGPS, TabularGPS},
+        tests::data::GPS_FILE,
+    };
+
+    fn read_csv_file(amount: Option<usize>) -> DataPointsGPS {
+        let csv_data = GPS_FILE.as_bytes();
+
+        let data = DataPointsGPS::from_csv(csv_data).unwrap();
+
+        if let Some(amount) = amount {
+            DataPointsGPS(data.0[..amount].to_vec())
+        } else {
+            data
+        }
+    }
 
     #[test]
     fn parse_gps_file() {
-        const MAX_DELTA: Duration = Duration::new(2, 0).unwrap();
+        const MAX_DELTA: Duration = Duration::seconds(2);
 
-        let csv_data = GPS_FILE.as_bytes();
-        let gps_tab = DataPointsGPS::from_csv(csv_data).unwrap();
-
-        let deltas = gps_tab
+        let deltas = read_csv_file(None)
             .0
             .iter()
             .map(|gps| &gps.offset)
@@ -111,5 +154,24 @@ mod tests {
             .collect::<Vec<TimeDelta>>();
 
         assert_eq!(deltas.len(), 0, "content: {deltas:?}");
+    }
+
+    #[test]
+    fn fetch_every_second() {
+        let table = read_csv_file(Some(10));
+
+        let fetched_gps = table
+            .fetch_every(Duration::seconds(2), Duration::milliseconds(400))
+            .collect::<Vec<&TabularGPS>>();
+
+        assert_eq!(
+            fetched_gps.len(),
+            table
+                .0
+                .len()
+                / 2,
+            "Tabular Data: {:#?}\nFetched Data: {fetched_gps:#?}",
+            table.0
+        );
     }
 }
