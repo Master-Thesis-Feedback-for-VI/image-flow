@@ -98,4 +98,3 @@ create-bindings-all: create-bindings-swift create-bindings-kotlin
 clean:
     cargo clean
     rm -rf ./.android ./bindings
-

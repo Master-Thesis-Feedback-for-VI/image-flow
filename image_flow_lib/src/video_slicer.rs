@@ -10,6 +10,7 @@ use ffmpeg_next::{
     media::Type::{self},
     software::scaling::{self, Flags},
 };
+use futures::StreamExt;
 use image::ColorType;
 use tokio::{
     fs::{self},
@@ -18,12 +19,44 @@ use tokio::{
 use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tracing::{debug, error, info, instrument, trace, warn};
 
-use crate::FramePath;
+use crate::{
+    FramePath, location::coordinate_system::Coordinate, location::tabular_gps::TabularGPS,
+};
 
 static ONCE: OnceCell<bool> = OnceCell::const_new();
 
+pub struct ImageGPSZip {
+    zipped_content: Vec<(Coordinate, FramePath)>,
+}
+
+impl ImageGPSZip {
+    /// # Errors
+    /// TODO
+    pub async fn from_video_and_gps(
+        video_path: impl AsRef<Path>,
+        tabular_data: TabularGPS,
+        storage_path: impl AsRef<Path>,
+    ) -> crate::Result<Self> {
+        let mut images = export_images_from_video(video_path, storage_path);
+
+        let mut frame_paths = Vec::new();
+        while let Some(frame) = images.next().await {
+            let frame = frame?;
+
+            frame_paths.push((Coordinate { lat: 0., lon: 0. }, frame));
+        }
+
+        let return_value = Self {
+            zipped_content: frame_paths,
+        };
+        Ok(return_value)
+    }
+}
+
+/// # Panics
+/// If FFMPEG cant init this will crash surely.
 #[instrument(skip(video_source_path, temporary_storage), fields(video_path = %video_source_path.as_ref().display()))]
-pub(crate) fn export_images_from_video(
+pub fn export_images_from_video(
     video_source_path: impl AsRef<Path>,
     temporary_storage: impl AsRef<Path>,
 ) -> impl Stream<Item = crate::Result<FramePath>> {

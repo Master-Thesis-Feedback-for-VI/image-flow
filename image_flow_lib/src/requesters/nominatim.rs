@@ -35,7 +35,8 @@ where
     D: serde::Deserializer<'de>,
 {
     let s: String = Deserialize::deserialize(deserializer)?;
-    s.parse::<f64>().map_err(serde::de::Error::custom)
+    s.parse::<f64>()
+        .map_err(serde::de::Error::custom)
 }
 
 #[derive(Debug, Clone, Deserialize)]
