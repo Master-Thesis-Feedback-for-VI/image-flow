@@ -2,6 +2,9 @@ use crate::context_recognition::Coordinate;
 
 type NameLocation = (&'static str, Coordinate);
 
+pub const GPS_FILE: &str =
+    include_str!("../../../sample_data/recording-2026-08-12-13-41-36/gps_timestamps.csv");
+
 pub const DANGEROUSE_LOCATIONS: &[NameLocation] = &[
     (
         "Karl-Wiechert-Allee",

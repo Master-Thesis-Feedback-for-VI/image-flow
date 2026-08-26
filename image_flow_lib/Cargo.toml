@@ -26,10 +26,14 @@ name = "fetch_json_locations"
 path = "./src/scripts/fetch_json_locations.rs"
 
 [dependencies]
-# chrono = "0.4"
+# ffmpeg-next = { version = "9", features = ["build"], optional = true }
 # opencv = { version = "0.100", features = ["clang-runtime"] }
 # toml = { version = "1.1", features = ["serde"] }
 # uuid = { version = "1.24", features = ["v7", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+csv = "1"
+ffmpeg-next = { version = "9", optional = true }
+image = { version = "0.25", optional = true }
 reqwest = { version = "0.13", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
