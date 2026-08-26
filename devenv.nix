@@ -6,9 +6,11 @@
 }:
 
 {
-  packages = [
-    pkgs.just
-    pkgs.cargo-ndk
+  packages = with pkgs; [
+    just
+    cargo-ndk
+    openssl
+    pkg-config
   ];
 
   languages = {
