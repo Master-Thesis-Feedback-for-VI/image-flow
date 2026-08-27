@@ -37,6 +37,7 @@ pub fn evaluate_context(location: Coordinate, frame: Arc<FramePath>) -> ContextC
 
 #[derive(Debug, uniffi::Object)]
 pub struct FramePath {
+    pub time_offset_from_first_frame: chrono::Duration,
     path: PathBuf,
     should_drop: bool,
 }

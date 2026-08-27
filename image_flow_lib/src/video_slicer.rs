@@ -1,5 +1,6 @@
-use std::{path::Path, time::Duration};
+use std::path::Path;
 
+use chrono::Duration;
 use ffmpeg_next::{
     self as ffmpeg, codec, decoder,
     format::{self, Pixel},
@@ -37,10 +38,8 @@ impl ImageGPSZip {
         capture_interval: Duration,
     ) -> crate::Result<Self> {
         let mut images = export_images_from_video(video_path, storage_path, capture_interval);
-        let gps_data = tabular_data.fetch_every(
-            chrono::Duration::milliseconds(capture_interval.as_millis() as _),
-            chrono::Duration::milliseconds(800),
-        );
+        let gps_data =
+            tabular_data.fetch_every(capture_interval, chrono::Duration::milliseconds(800));
 
         let mut frame_paths = Vec::new();
         while let Some(frame) = images
@@ -159,7 +158,7 @@ fn decode_and_send(
         Flags::BILINEAR,
     )?;
 
-    let mut next_capture_time = Duration::new(0, 0);
+    let mut next_capture_time = Duration::zero();
     let mut frames_captured = 0u64;
 
     let mut receive_and_process_decoded_frames =
@@ -180,7 +179,7 @@ fn decode_and_send(
 
                         let frame_path = relative_dir_storage_path
                             .as_ref()
-                            .join(format!("{:05}s.png", next_capture_time.as_millis()));
+                            .join(format!("{:05}s.png", next_capture_time.num_milliseconds()));
                         let frame_path_disp = frame_path.clone();
                         let frame_path_disp = frame_path_disp.display();
 
@@ -192,6 +191,7 @@ fn decode_and_send(
 
                         // Stop decoding early if the receiver was dropped.
                         let tmp_frame_path = FramePath {
+                            time_offset_from_first_frame: current_pts_time,
                             path: frame_path,
                             should_drop: true,
                         };
@@ -233,7 +233,7 @@ fn pts_to_duration(pts: i64, time_base: ffmpeg::Rational) -> Duration {
     let num = i64::from(time_base.numerator()) as i128;
     let den = i64::from(time_base.denominator()) as i128;
     let nanos = (pts as i128 * num * 1_000_000_000) / den;
-    Duration::from_nanos(nanos as u64)
+    Duration::nanoseconds(nanos as _)
 }
 
 fn save_png(frame: &Video, path: impl AsRef<Path>) -> crate::Result<()> {
@@ -276,7 +276,7 @@ impl VideoMetadata {
             let ictx = format::input(&path)?;
             let duration_seconds_fractional =
                 ictx.duration() as f64 / f64::from(ffmpeg::ffi::AV_TIME_BASE);
-            let duration = Duration::from_secs(duration_seconds_fractional.round() as u64);
+            let duration = Duration::seconds(duration_seconds_fractional.round() as _);
 
             Ok(Self {
                 name: file_name,
@@ -290,8 +290,9 @@ impl VideoMetadata {
 
 #[cfg(test)]
 mod tests {
-    use std::{path::Path, time::Duration};
+    use std::path::Path;
 
+    use chrono::Duration;
     use futures::StreamExt;
     use tokio::fs;
 
@@ -300,8 +301,8 @@ mod tests {
         video_slicer::{VideoMetadata, export_images_from_video},
     };
 
-    const ACCEPTED_DUR: Duration = Duration::from_secs(1);
-    const CAPTURE_INTERVAL: Duration = Duration::from_secs(1);
+    const ACCEPTED_DUR: Duration = Duration::seconds(1);
+    const CAPTURE_INTERVAL: Duration = Duration::seconds(1);
 
     async fn check_video(src: &str) -> Result<(), String> {
         let video_metadata = VideoMetadata::open(src)
@@ -327,14 +328,14 @@ mod tests {
             .map_err(|e| e.to_string())?;
 
         let seconds = export_images_from_video(src, &dir, CAPTURE_INTERVAL)
-            .fold(0u64, |acc, frame| async move {
+            .fold(0i64, |acc, frame| async move {
                 if let Ok(mut frame) = frame {
                     frame.should_drop = false;
                 }
                 acc + 1
             })
-            .await as u64;
-        let diff = Duration::from_secs(seconds).abs_diff(video_metadata.duration);
+            .await;
+        let diff = (Duration::seconds(seconds) - video_metadata.duration).abs();
 
         if diff > ACCEPTED_DUR {
             return Err(format!(
