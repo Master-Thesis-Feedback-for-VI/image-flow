@@ -52,6 +52,16 @@ impl DataPointsGPS {
             })
     }
 
+    #[must_use]
+    pub fn fetch_best_match(
+        &self,
+        offset: Duration,
+        range_around_offset: Duration,
+    ) -> Option<&TabularGPS> {
+        self.fetch(offset, range_around_offset)
+            .best_match_by_distance(offset)
+    }
+
     /// # Panics
     /// This function panics if `lower_bound > upper_bound`.
     pub fn fetch_within_bounds(
@@ -98,6 +108,29 @@ impl DataPointsGPS {
 
                 false
             })
+    }
+}
+
+pub trait BestMatchByDistance<'a> {
+    fn best_match_by_distance(self, offset: Duration) -> Option<&'a TabularGPS>;
+}
+
+impl<'a, I> BestMatchByDistance<'a> for I
+where
+    I: Iterator<Item = &'a TabularGPS>,
+{
+    fn best_match_by_distance(self, offset: Duration) -> Option<&'a TabularGPS> {
+        self.fold(None, move |acc, singular_match| {
+            acc.map_or(Some(singular_match), |best_tabular_acc| {
+                let diff_to_offset_acc = (best_tabular_acc.offset - offset).abs();
+                let diff = (singular_match.offset - offset).abs();
+                if diff < diff_to_offset_acc {
+                    Some(singular_match)
+                } else {
+                    acc
+                }
+            })
+        })
     }
 }
 

@@ -38,8 +38,6 @@ impl ImageGPSZip {
         capture_interval: Duration,
     ) -> crate::Result<Self> {
         let mut images = export_images_from_video(video_path, storage_path, capture_interval);
-        let gps_data =
-            tabular_data.fetch_every(capture_interval, chrono::Duration::milliseconds(800));
 
         let mut frame_paths = Vec::new();
         while let Some(frame) = images
@@ -47,6 +45,10 @@ impl ImageGPSZip {
             .await
         {
             let frame = frame?;
+            let cord = tabular_data.fetch(
+                frame.time_offset_from_first_frame,
+                Duration::milliseconds(400),
+            );
 
             frame_paths.push((Coordinate { lat: 0., lon: 0. }, frame));
         }
