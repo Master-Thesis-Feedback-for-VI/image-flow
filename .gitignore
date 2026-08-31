@@ -3,7 +3,7 @@
 /ios
 .DS_Store
 local.properties
-/out
+out
 /.android
 
 # Devenv

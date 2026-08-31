@@ -27,7 +27,9 @@ impl ContextCategory {
         let loc_data = NominatimLocationData::from_cords(coordinates).await?;
         let mut categories = HashSet::new();
 
-        let location_type = loc_data.location_type.as_str();
+        let location_type = loc_data
+            .location_type
+            .as_str();
         match location_type {
             "elevator" => {
                 categories.insert(Self::Elevator);
@@ -50,12 +52,16 @@ impl ContextCategory {
             _ => {
                 unreachable!(
                     "New Type: {location_type}, check it out here: {}",
-                    loc_data.as_coordinate().as_url_osm()
+                    loc_data
+                        .as_coordinate()
+                        .as_url_osm()
                 )
             }
         }
 
-        let location_class = loc_data.class.as_str();
+        let location_class = loc_data
+            .class
+            .as_str();
         match location_class {
             "highway" => {
                 categories.insert(Self::Street);
@@ -69,7 +75,9 @@ impl ContextCategory {
             _ => {
                 unreachable!(
                     "New Class: {location_class}, check it out here: {}",
-                    loc_data.as_coordinate().as_url_osm()
+                    loc_data
+                        .as_coordinate()
+                        .as_url_osm()
                 )
             }
         }
@@ -113,15 +121,15 @@ mod tests {
         context::ContextCategory,
         location::coordinate_system::Coordinate,
         requesters::nominatim::NominatimLocationData,
-        tests::data::{self, INTERSECTION_LOCATIONS},
+        tests::location_data::{self, INTERSECTION_LOCATIONS},
     };
 
     #[tokio::test]
     async fn check_all_available_types() {
         let all_locs = [
-            data::HARMLESS_LOCATIONS,
-            data::MODERATE_LOCATIONS,
-            data::DANGEROUSE_LOCATIONS,
+            location_data::HARMLESS_LOCATIONS,
+            location_data::MODERATE_LOCATIONS,
+            location_data::DANGEROUSE_LOCATIONS,
         ]
         .concat();
 
@@ -134,8 +142,10 @@ mod tests {
 
     #[tokio::test]
     async fn apartment() {
-        let loc = data::DANGEROUSE_LOCATIONS;
-        let element = loc.get(2).unwrap();
+        let loc = location_data::DANGEROUSE_LOCATIONS;
+        let element = loc
+            .get(2)
+            .unwrap();
         insta::assert_debug_snapshot!(element, @r#"
         (
             "Limmerstrasse (Am Kuechengarten)",
@@ -146,7 +156,9 @@ mod tests {
         )
         "#);
 
-        let nom_data = NominatimLocationData::from_cords(element.1).await.unwrap();
+        let nom_data = NominatimLocationData::from_cords(element.1)
+            .await
+            .unwrap();
         insta::assert_debug_snapshot!(nom_data, @r#"
         NominatimLocationData {
             name_map: None,
@@ -160,8 +172,12 @@ mod tests {
         "#);
         insta::assert_snapshot!(&nom_data.as_coordinate().as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3715399&mlon=9.7125486#map=17/52.3715399/9.7125486");
 
-        let categories = ContextCategory::from_cords(element.1).await.unwrap();
-        let mut vec_categories: Vec<ContextCategory> = categories.into_iter().collect();
+        let categories = ContextCategory::from_cords(element.1)
+            .await
+            .unwrap();
+        let mut vec_categories: Vec<ContextCategory> = categories
+            .into_iter()
+            .collect();
         vec_categories.sort();
         insta::assert_debug_snapshot!(vec_categories, @"
         [
@@ -173,8 +189,10 @@ mod tests {
 
     #[tokio::test]
     async fn karl_wichert_allee() {
-        let loc = data::DANGEROUSE_LOCATIONS;
-        let element = loc.first().unwrap();
+        let loc = location_data::DANGEROUSE_LOCATIONS;
+        let element = loc
+            .first()
+            .unwrap();
         insta::assert_debug_snapshot!(element, @r#"
         (
             "Karl-Wiechert-Allee",
@@ -185,7 +203,9 @@ mod tests {
         )
         "#);
 
-        let nom_data = NominatimLocationData::from_cords(element.1).await.unwrap();
+        let nom_data = NominatimLocationData::from_cords(element.1)
+            .await
+            .unwrap();
         insta::assert_debug_snapshot!(nom_data, @r#"
         NominatimLocationData {
             name_map: None,
@@ -199,8 +219,12 @@ mod tests {
         "#);
         insta::assert_snapshot!(&nom_data.as_coordinate().as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3860214&mlon=9.8088121#map=17/52.3860214/9.8088121");
 
-        let categories = ContextCategory::from_cords(element.1).await.unwrap();
-        let mut vec_categories: Vec<ContextCategory> = categories.into_iter().collect();
+        let categories = ContextCategory::from_cords(element.1)
+            .await
+            .unwrap();
+        let mut vec_categories: Vec<ContextCategory> = categories
+            .into_iter()
+            .collect();
         vec_categories.sort();
         insta::assert_debug_snapshot!(vec_categories, @"
         [
@@ -237,7 +261,9 @@ mod tests {
             .unwrap();
 
         let name = no_intersection.0;
-        let url = no_intersection.1.as_url_osm();
+        let url = no_intersection
+            .1
+            .as_url_osm();
         assert!(
             !categories.contains(&ContextCategory::Intersection),
             "Location: {name} does not have a intersection although it should. Check out this url to inspect the location: {url}"

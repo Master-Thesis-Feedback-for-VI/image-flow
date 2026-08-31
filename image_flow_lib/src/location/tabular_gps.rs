@@ -3,6 +3,8 @@ use std::io;
 use chrono::{DateTime, Duration, TimeDelta, TimeZone, Utc};
 use serde::{Deserialize, Deserializer};
 
+use crate::location::coordinate_system::Coordinate;
+
 #[derive(Deserialize, Debug, Clone, Copy)]
 pub struct TabularGPS {
     #[serde(deserialize_with = "de_ts")]
@@ -11,6 +13,22 @@ pub struct TabularGPS {
     longitude: f64,
     #[serde(default)]
     offset: TimeDelta,
+}
+
+impl TabularGPS {
+    #[must_use]
+    pub fn coordinates(&self) -> Coordinate {
+        (*self).into()
+    }
+}
+
+impl From<TabularGPS> for Coordinate {
+    fn from(value: TabularGPS) -> Self {
+        Self {
+            lat: value.latitude,
+            lon: value.longitude,
+        }
+    }
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -154,12 +172,15 @@ mod tests {
 
     use crate::{
         location::tabular_gps::{DataPointsGPS, TabularGPS},
-        tests::data::GPS_FILE,
+        tests::video_data::SAMPLE_VIDEO_SOURCES,
     };
 
     fn read_csv_file(amount: Option<usize>) -> DataPointsGPS {
-        let csv_data = GPS_FILE.as_bytes();
-
+        let csv_data = SAMPLE_VIDEO_SOURCES
+            .first()
+            .unwrap()
+            .csv_embed
+            .as_bytes();
         let data = DataPointsGPS::from_csv(csv_data).unwrap();
 
         if let Some(amount) = amount {

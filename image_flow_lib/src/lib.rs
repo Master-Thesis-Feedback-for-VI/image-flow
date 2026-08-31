@@ -14,17 +14,17 @@ pub mod requesters;
 #[cfg(feature = "video")]
 pub mod video_slicer;
 
+pub use crate::error::{Error, Result};
+
 #[cfg(test)]
 #[allow(dead_code)]
 pub(crate) mod tests;
 
-use std::{path::PathBuf, sync::Arc};
-
-pub use crate::error::{Error, Result};
+uniffi::setup_scaffolding!();
 
 use crate::{context::ContextCategory, location::coordinate_system::Coordinate};
-
-uniffi::setup_scaffolding!();
+use chrono::Duration;
+use std::{path::PathBuf, sync::Arc};
 
 #[allow(clippy::needless_pass_by_value)]
 #[uniffi::export]
@@ -37,9 +37,27 @@ pub fn evaluate_context(location: Coordinate, frame: Arc<FramePath>) -> ContextC
 
 #[derive(Debug, uniffi::Object)]
 pub struct FramePath {
-    pub time_offset_from_first_frame: chrono::Duration,
+    pub time_offset_from_first_frame: Duration,
     path: PathBuf,
-    should_drop: bool,
+    pub should_drop: bool,
+}
+
+#[uniffi::export]
+impl FramePath {
+    /// TODO
+    ///
+    /// # Panics
+    /// TODO
+    #[uniffi::constructor]
+    #[must_use]
+    pub fn new(offset: std::time::Duration, path: &str) -> Self {
+        Self {
+            time_offset_from_first_frame: Duration::from_std(offset)
+                .expect("The time conversion should not fail"),
+            path: PathBuf::from(path),
+            should_drop: true,
+        }
+    }
 }
 
 impl Drop for FramePath {
