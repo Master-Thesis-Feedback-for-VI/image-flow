@@ -162,6 +162,7 @@ fn decode_and_send(
 
     let mut next_capture_time = Duration::zero();
     let mut frames_captured = 0u64;
+    let mut first_pts = None;
 
     let mut receive_and_process_decoded_frames =
         |decoder: &mut decoder::Video| -> crate::Result<()> {
@@ -170,8 +171,9 @@ fn decode_and_send(
                 .receive_frame(&mut video_decoded)
                 .is_ok()
             {
-                if let Some(pts) = video_decoded.pts() {
-                    let current_pts_time = pts_to_duration(pts, time_base);
+                if let Some(pts) = video_decoded.timestamp() {
+                    let base_pts = *first_pts.get_or_insert(pts);
+                    let current_pts_time = pts_to_duration(pts - base_pts, time_base);
 
                     trace!(pts, ?next_capture_time, "capturing frame at pts");
 
@@ -181,7 +183,7 @@ fn decode_and_send(
 
                         let frame_path = relative_dir_storage_path
                             .as_ref()
-                            .join(format!("{:05}s.png", next_capture_time.num_milliseconds()));
+                            .join(format!("{:05}s.png", current_pts_time.num_milliseconds()));
                         let frame_path_disp = frame_path.clone();
                         let frame_path_disp = frame_path_disp.display();
 
@@ -217,7 +219,10 @@ fn decode_and_send(
     for (stream, packet) in ictx.packets() {
         if stream.index() == video_stream_index {
             packets_for_stream += 1;
-            decoder.send_packet(&packet)?;
+            if let Err(e) = decoder.send_packet(&packet) {
+                error!(error = ?e, packets_for_stream, "send_packet failed");
+                return Err(e.into());
+            }
             receive_and_process_decoded_frames(&mut decoder)?;
         }
     }
@@ -232,10 +237,15 @@ fn decode_and_send(
 }
 
 fn pts_to_duration(pts: i64, time_base: ffmpeg::Rational) -> Duration {
-    let num = i64::from(time_base.numerator()) as i128;
-    let den = i64::from(time_base.denominator()) as i128;
-    let nanos = (pts as i128 * num * 1_000_000_000) / den;
-    Duration::nanoseconds(nanos as _)
+    let num = i128::from(time_base.numerator());
+    let den = i128::from(time_base.denominator());
+
+    let nanos = i128::from(pts)
+        .saturating_mul(num)
+        .saturating_mul(1_000_000_000)
+        / den;
+
+    Duration::nanoseconds(nanos.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64)
 }
 
 fn save_png(frame: &Video, path: impl AsRef<Path>) -> crate::Result<()> {
@@ -329,20 +339,22 @@ mod tests {
             .await
             .map_err(|e| e.to_string())?;
 
-        let seconds = export_images_from_video(src, &dir, CAPTURE_INTERVAL)
-            .fold(0i64, |acc, frame| async move {
-                if let Ok(mut frame) = frame {
-                    frame.should_drop = false;
-                }
-                acc + 1
-            })
-            .await;
+        let mut stream = export_images_from_video(src, &dir, CAPTURE_INTERVAL);
+        let mut seconds = 0i64;
+        while let Some(frame) = stream
+            .next()
+            .await
+        {
+            let mut frame = frame.map_err(|e| format!("frame error for {src}: {e:#?}"))?;
+            frame.should_drop = false;
+            seconds += 1;
+        }
         let diff = (Duration::seconds(seconds) - video_metadata.duration).abs();
 
         if diff > ACCEPTED_DUR {
             return Err(format!(
-                "{}: expected ~{:?}, got diff {:?}",
-                video_metadata.name, video_metadata.duration, seconds
+                "{}: expected ~{:?}, got {} frames (diff {:?})",
+                video_metadata.name, video_metadata.duration, seconds, diff
             ));
         }
         Ok(())
@@ -350,6 +362,11 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_images() {
+        // let _ = tracing_subscriber::fmt()
+        //     .with_env_filter("image_flow=trace")
+        //     .with_test_writer()
+        //     .try_init();
+
         let errors: Vec<String> = futures::future::join_all(
             SAMPLE_VIDEO_SOURCES
                 .iter()
