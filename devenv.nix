@@ -13,6 +13,8 @@
     pkg-config
     ffmpeg
     nasm
+    git
+    git-lfs
   ];
 
   languages = {

@@ -3,6 +3,19 @@ use std::time::Duration as DefaultDuration;
 
 use chrono::Duration;
 
+use crate::context::location_based_context::UniqueGeographicCategories;
+
+/// TODO
+///
+/// # Errors
+/// TODO
+pub fn evaluate_image_into_categories() -> crate::Result<UniqueGeographicCategories> {
+    todo!();
+
+    let ctx = UniqueGeographicCategories::new();
+    Ok(ctx)
+}
+
 #[derive(Debug, uniffi::Object)]
 pub struct FramePath {
     pub time_offset_from_first_frame: Duration,

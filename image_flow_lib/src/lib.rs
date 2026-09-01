@@ -26,13 +26,13 @@ uniffi::setup_scaffolding!();
 use crate::{
     context::{
         ContextCategory, image_based_context::FramePath,
-        location_based_context::evaulate_location_into_categories,
+        location_based_context::evaluate_location_into_categories,
     },
     error::ImageFlowError,
     location::coordinate_system::Coordinate,
 };
-use std::{collections::HashSet, result::Result as DefaultResult};
 use std::sync::Arc;
+use std::{collections::HashSet, result::Result as DefaultResult};
 
 /// TODO
 ///
@@ -56,7 +56,7 @@ async fn evaluate_context_impl(
     location: impl Into<Coordinate>,
     frame: &FramePath,
 ) -> crate::Result<HashSet<ContextCategory>> {
-    let categories = evaulate_location_into_categories(location).await?;
+    let categories = evaluate_location_into_categories(location).await?;
     let _ = frame;
 
     Ok(categories)
