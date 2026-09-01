@@ -176,12 +176,24 @@ where
 
 #[cfg(test)]
 mod tests {
-    use chrono::{Duration, TimeDelta};
+    use chrono::{Duration, TimeDelta, TimeZone, Utc};
 
     use crate::{
-        location::tabular_gps::{DataPointsGPS, TabularGPS},
+        location::tabular_gps::{BestMatchByDistance, DataPointsGPS, TabularGPS},
         tests::video_data::SAMPLE_VIDEO_SOURCES,
     };
+
+    fn gps_with_offset(offset: Duration) -> TabularGPS {
+        TabularGPS {
+            timestamp: Utc
+                .timestamp_opt(0, 0)
+                .single()
+                .unwrap(),
+            latitude: 0.0,
+            longitude: 0.0,
+            offset,
+        }
+    }
 
     fn read_csv_file(amount: Option<usize>) -> DataPointsGPS {
         let csv_data = SAMPLE_VIDEO_SOURCES
@@ -235,5 +247,48 @@ mod tests {
             "Tabular Data: {:#?}\nFetched Data: {fetched_gps:#?}",
             table.0
         );
+    }
+
+    #[test]
+    fn best_match_by_distance_returns_none_for_empty_iterator() {
+        let points = Vec::<TabularGPS>::new();
+
+        assert!(
+            points
+                .iter()
+                .best_match_by_distance(Duration::seconds(1))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn best_match_by_distance_picks_closest_offset() {
+        let points = [
+            gps_with_offset(Duration::seconds(-5)),
+            gps_with_offset(Duration::seconds(2)),
+            gps_with_offset(Duration::seconds(9)),
+        ];
+
+        let best = points
+            .iter()
+            .best_match_by_distance(Duration::seconds(3))
+            .unwrap();
+
+        assert_eq!(best.offset, Duration::seconds(2));
+    }
+
+    #[test]
+    fn best_match_by_distance_keeps_first_match_on_tie() {
+        let points = [
+            gps_with_offset(Duration::seconds(-1)),
+            gps_with_offset(Duration::seconds(1)),
+        ];
+
+        let best = points
+            .iter()
+            .best_match_by_distance(Duration::seconds(0))
+            .unwrap();
+
+        assert_eq!(best.offset, Duration::seconds(-1));
     }
 }
