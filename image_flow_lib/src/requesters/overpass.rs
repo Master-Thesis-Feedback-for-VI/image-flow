@@ -48,7 +48,12 @@ pub async fn fetch_raw_overpass_data<T: Into<Coordinate>>(
 
         match response {
             Ok(response) => match response.error_for_status() {
-                Ok(response) => return response.json().await.map_err(error::serialization),
+                Ok(response) => {
+                    return response
+                        .json()
+                        .await
+                        .map_err(error::serialization);
+                }
                 Err(err) => {
                     last_error = Some(error::request(err));
                 }
@@ -118,11 +123,19 @@ fn haversine_m(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let (lat1r, lat2r) = (lat1.to_radians(), lat2.to_radians());
     let dlat = (lat2 - lat1).to_radians();
     let dlon = (lon2 - lon1).to_radians();
-    let a = (dlat / 2.0).sin().mul_add(
-        (dlat / 2.0).sin(),
-        lat1r.cos() * lat2r.cos() * (dlon / 2.0).sin().powi(2),
-    );
-    let c = 2.0 * a.sqrt().asin();
+    let a = (dlat / 2.0)
+        .sin()
+        .mul_add(
+            (dlat / 2.0).sin(),
+            lat1r.cos()
+                * lat2r.cos()
+                * (dlon / 2.0)
+                    .sin()
+                    .powi(2),
+        );
+    let c = 2.0
+        * a.sqrt()
+            .asin();
     R * c
 }
 
@@ -173,6 +186,10 @@ pub async fn find_nearby_intersections<T: Into<Coordinate>>(
         })
         .collect();
 
-    intersections.sort_by(|a, b| a.distance_m.partial_cmp(&b.distance_m).unwrap());
+    intersections.sort_by(|a, b| {
+        a.distance_m
+            .partial_cmp(&b.distance_m)
+            .unwrap()
+    });
     Ok(intersections)
 }

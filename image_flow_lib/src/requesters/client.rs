@@ -46,16 +46,25 @@ pub fn default_headers() -> HeaderMap {
 }
 
 pub async fn get_client() -> &'static Client {
-    CLIENT.get_or_init(init_client).await
+    CLIENT
+        .get_or_init(init_client)
+        .await
 }
 
 #[must_use]
 pub async fn throttle() {
-    let mut last = LAST_REQUEST.lock().await;
+    let mut last = LAST_REQUEST
+        .lock()
+        .await;
     if let Some(prev) = *last {
         let elapsed = prev.elapsed();
         if elapsed < MIN_INTERVAL {
-            sleep(MIN_INTERVAL.checked_sub(elapsed).unwrap()).await;
+            sleep(
+                MIN_INTERVAL
+                    .checked_sub(elapsed)
+                    .unwrap(),
+            )
+            .await;
         }
     }
     *last = Some(Instant::now());
@@ -64,11 +73,15 @@ pub async fn throttle() {
 pub async fn throttled_get(url: &str) -> reqwest::RequestBuilder {
     let () = throttle().await;
 
-    get_client().await.get(url)
+    get_client()
+        .await
+        .get(url)
 }
 
 pub async fn throttled_post(url: &str) -> reqwest::RequestBuilder {
     let () = throttle().await;
 
-    get_client().await.post(url)
+    get_client()
+        .await
+        .post(url)
 }

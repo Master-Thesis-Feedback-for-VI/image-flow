@@ -41,18 +41,26 @@ pub(crate) async fn main() {
 
     let mut data = Vec::new();
     for (k, v) in places {
-        let mut raw = fetch_raw_nominatim_data(v).await.unwrap();
+        let mut raw = fetch_raw_nominatim_data(v)
+            .await
+            .unwrap();
         raw.as_object_mut()
             .unwrap()
             .insert("name_map".to_string(), k.into());
         raw.as_object_mut()
             .unwrap()
-            .insert("url_osm".to_string(), v.print_location_url().into());
+            .insert(
+                "url_osm".to_string(),
+                v.print_location_url()
+                    .into(),
+            );
         data.push(raw);
     }
     let data_write = json!(data);
 
-    fs::create_dir_all("./out").await.unwrap();
+    fs::create_dir_all("./out")
+        .await
+        .unwrap();
 
     let out_path = "./out/nominatim_raw_fetch.json";
     match fs::remove_file(out_path).await {
@@ -62,5 +70,7 @@ pub(crate) async fn main() {
     }
 
     let pretty = serde_json::to_string_pretty(&data_write).unwrap();
-    fs::write(out_path, pretty).await.unwrap();
+    fs::write(out_path, pretty)
+        .await
+        .unwrap();
 }

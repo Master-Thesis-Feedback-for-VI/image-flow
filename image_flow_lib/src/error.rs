@@ -71,9 +71,17 @@ where
 impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut builder = f.debug_struct("image_flow::Error");
-        builder.field("kind", &self.inner.kind);
+        builder.field(
+            "kind",
+            &self
+                .inner
+                .kind,
+        );
 
-        if let Some(ref source) = self.inner.source {
+        if let Some(ref source) = self
+            .inner
+            .source
+        {
             builder.field("source", source);
         }
 
