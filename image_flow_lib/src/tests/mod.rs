@@ -9,7 +9,8 @@ use tokio::sync::Mutex;
 pub mod location_data;
 pub mod video_data;
 
-static TESTING_FILE_MANAGER: Mutex<TestingFileManger> = Mutex::const_new(TestingFileManger::new());
+pub static TESTING_FILE_MANAGER: Mutex<TestingFileManger> =
+    Mutex::const_new(TestingFileManger::new());
 
 const TEST_REMOVE_FILES_AFTER_RERUN: bool = match option_env!("TEST_REMOVE_FILES_AFTER_RERUN") {
     Some("false" | "FALSE" | "no" | "NO") => false,
