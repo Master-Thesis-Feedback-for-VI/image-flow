@@ -1,4 +1,5 @@
 #![feature(const_trait_impl)]
+#![cfg_attr(test, feature(const_cmp))]
 #![allow(
     clippy::cast_precision_loss,
     clippy::cast_lossless,
