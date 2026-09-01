@@ -204,7 +204,7 @@ fn decode_and_send(
 
                         let frame_path = relative_dir_storage_path
                             .as_ref()
-                            .join(format!("{:05}s.png", current_pts_time.num_milliseconds()));
+                            .join(format!("{:09}s.png", current_pts_time.num_milliseconds()));
                         let frame_path_disp = frame_path.clone();
                         let frame_path_disp = frame_path_disp.display();
 
@@ -330,7 +330,7 @@ mod tests {
 
     use crate::{
         location::tabular_gps::DataPointsGPS,
-        tests::video_data::SAMPLE_VIDEO_SOURCES,
+        tests::{TESTING_FILE_MANAGER, video_data::SAMPLE_VIDEO_SOURCES},
         video_slicer::{ImageGPSZip, VideoMetadata, export_images_from_video},
     };
 
@@ -347,20 +347,12 @@ mod tests {
             .and_then(|s| s.to_str())
             .ok_or_else(|| format!("invalid file stem for {}", video_metadata.name))?;
 
-        let dir = Path::new("..")
-            .join("out")
-            .join(format!("video-{file_stem}"));
-
-        if dir.exists() {
-            fs::remove_dir_all(&dir)
-                .await
-                .ok(); // best-effort cleanup
-        }
-        fs::create_dir_all(&dir)
+        let out_dir = TESTING_FILE_MANAGER
+            .lock()
             .await
-            .map_err(|e| e.to_string())?;
+            .test_out(format!("video-{file_stem}"));
 
-        let mut stream = export_images_from_video(src, &dir, CAPTURE_INTERVAL);
+        let mut stream = export_images_from_video(src, &out_dir, CAPTURE_INTERVAL);
         let mut seconds = 0i64;
         while let Some(frame) = stream
             .next()
@@ -407,15 +399,10 @@ mod tests {
             .iter()
             .enumerate()
         {
-            let out_dir = Path::new(".")
-                .join("out")
-                .join("video_pipeline")
-                .join(format!("{index}"));
-
-            if out_dir.exists() {
-                std::fs::remove_dir_all(&out_dir).unwrap();
-            }
-            std::fs::create_dir_all(&out_dir).unwrap();
+            let out_dir = TESTING_FILE_MANAGER
+                .lock()
+                .await
+                .test_out(Path::new("video_pipeline").join(format!("{index}")));
 
             let raw_b = gps_video_combo
                 .csv_embed

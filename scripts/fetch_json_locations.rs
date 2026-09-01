@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::ErrorKind};
+use std::{collections::HashMap, io::ErrorKind, path::Path};
 
 use image_flow::{
     location::coordinate_system::Coordinate, requesters::nominatim::fetch_raw_nominatim_data,
@@ -58,15 +58,16 @@ pub(crate) async fn main() {
     }
     let data_write = json!(data);
 
-    fs::create_dir_all("./out")
+    let out_dir = Path::new(".").join("out");
+    fs::create_dir_all(&out_dir)
         .await
         .unwrap();
 
-    let out_path = "./out/nominatim_raw_fetch.json";
-    match fs::remove_file(out_path).await {
+    let out_path = out_dir.join("nominatim_raw_fetch.json");
+    match fs::remove_file(&out_path).await {
         Ok(()) => {}
         Err(e) if e.kind() == ErrorKind::NotFound => {}
-        Err(e) => panic!("failed to remove {out_path}: {e}"),
+        Err(e) => panic!("failed to remove {}: {e}", out_path.display()),
     }
 
     let pretty = serde_json::to_string_pretty(&data_write).unwrap();
