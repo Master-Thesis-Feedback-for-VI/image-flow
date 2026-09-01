@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use crate::{
+    context::ContextCategory,
     location::coordinate_system::Coordinate,
     requesters::{nominatim::NominatimLocationData, overpass::find_nearby_intersections},
 };
@@ -14,30 +15,12 @@ const MIN_INTERSECTION_NODES: usize = 2;
 pub async fn evaulate_location_into_categories<T: Into<Coordinate>>(
     pos: T,
 ) -> crate::Result<UniqueGeographicCategories> {
-    GeographicCategory::from_cords(pos).await
+    ContextCategory::from_cords(pos).await
 }
 
-/// All potential geographic categories supported.
-///
-/// <https://github.com/Master-Thesis-Feedback-for-VI/image-flow/issues/2>
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub enum GeographicCategory {
-    Forest,
+pub type UniqueGeographicCategories = HashSet<ContextCategory>;
 
-    Outside,
-    Building,
-
-    Street,
-    Pedestrian,
-    Intersection,
-
-    Elevator,
-}
-
-pub type UniqueGeographicCategories = HashSet<GeographicCategory>;
-
-impl GeographicCategory {
+impl ContextCategory {
     async fn extract_categories_from_nominatim<T: Into<Coordinate>>(
         coordinates: T,
     ) -> crate::Result<UniqueGeographicCategories> {
@@ -135,21 +118,23 @@ impl GeographicCategory {
 #[cfg(test)]
 mod tests {
     use crate::{
-        context_recognition::{Coordinate, GeographicCategory, NominatimLocationData},
-        tests::data::{self, INTERSECTION_LOCATIONS},
+        context::ContextCategory,
+        location::coordinate_system::Coordinate,
+        requesters::nominatim::NominatimLocationData,
+        tests::location_data::{self, INTERSECTION_LOCATIONS},
     };
 
     #[tokio::test]
     async fn check_all_available_types() {
         let all_locs = [
-            data::HARMLESS_LOCATIONS,
-            data::MODERATE_LOCATIONS,
-            data::DANGEROUSE_LOCATIONS,
+            location_data::HARMLESS_LOCATIONS,
+            location_data::MODERATE_LOCATIONS,
+            location_data::DANGEROUSE_LOCATIONS,
         ]
         .concat();
 
         for (_name, loc) in all_locs {
-            _ = GeographicCategory::extract_categories_from_nominatim(loc)
+            _ = ContextCategory::extract_categories_from_nominatim(loc)
                 .await
                 .unwrap();
         }
@@ -157,7 +142,7 @@ mod tests {
 
     #[tokio::test]
     async fn apartment() {
-        let loc = data::DANGEROUSE_LOCATIONS;
+        let loc = location_data::DANGEROUSE_LOCATIONS;
         let element = loc
             .get(2)
             .unwrap();
@@ -187,10 +172,10 @@ mod tests {
         "#);
         insta::assert_snapshot!(&nom_data.as_coordinate().as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3715399&mlon=9.7125486#map=17/52.3715399/9.7125486");
 
-        let categories = GeographicCategory::from_cords(element.1)
+        let categories = ContextCategory::from_cords(element.1)
             .await
             .unwrap();
-        let mut vec_categories: Vec<GeographicCategory> = categories
+        let mut vec_categories: Vec<ContextCategory> = categories
             .into_iter()
             .collect();
         vec_categories.sort();
@@ -204,7 +189,7 @@ mod tests {
 
     #[tokio::test]
     async fn karl_wichert_allee() {
-        let loc = data::DANGEROUSE_LOCATIONS;
+        let loc = location_data::DANGEROUSE_LOCATIONS;
         let element = loc
             .first()
             .unwrap();
@@ -234,10 +219,10 @@ mod tests {
         "#);
         insta::assert_snapshot!(&nom_data.as_coordinate().as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3860214&mlon=9.8088121#map=17/52.3860214/9.8088121");
 
-        let categories = GeographicCategory::from_cords(element.1)
+        let categories = ContextCategory::from_cords(element.1)
             .await
             .unwrap();
-        let mut vec_categories: Vec<GeographicCategory> = categories
+        let mut vec_categories: Vec<ContextCategory> = categories
             .into_iter()
             .collect();
         vec_categories.sort();
@@ -253,13 +238,13 @@ mod tests {
     async fn intersections() {
         let intersection_locations = INTERSECTION_LOCATIONS;
         for (name, location) in intersection_locations {
-            let categories = GeographicCategory::extract_categories_from_overpass(*location)
+            let categories = ContextCategory::extract_categories_from_overpass(*location)
                 .await
                 .unwrap();
 
             let url = location.as_url_osm();
             assert!(
-                categories.contains(&GeographicCategory::Intersection),
+                categories.contains(&ContextCategory::Intersection),
                 "Location: {name} does not have a intersection although it should. Check out this url to inspect the location: {url}"
             );
         }
@@ -271,7 +256,7 @@ mod tests {
                 lon: 9.781_501,
             },
         );
-        let categories = GeographicCategory::extract_categories_from_overpass(no_intersection.1)
+        let categories = ContextCategory::extract_categories_from_overpass(no_intersection.1)
             .await
             .unwrap();
 
@@ -280,7 +265,7 @@ mod tests {
             .1
             .as_url_osm();
         assert!(
-            !categories.contains(&GeographicCategory::Intersection),
+            !categories.contains(&ContextCategory::Intersection),
             "Location: {name} does not have a intersection although it should. Check out this url to inspect the location: {url}"
         );
     }

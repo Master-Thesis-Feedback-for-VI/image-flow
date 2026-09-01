@@ -13,17 +13,18 @@ keywords.workspace = true
 name = "image_flow"
 crate-type = ["cdylib", "rlib", "staticlib"]
 
-[profile.dev.package]
-insta.opt-level = 3
-similar.opt-level = 3
-
-[[example]]
-name = "filter_feed"
-path = "../examples/filter_feed.rs"
-
 [[bin]]
 name = "fetch_json_locations"
-path = "./src/scripts/fetch_json_locations.rs"
+path = "../scripts/fetch_json_locations.rs"
+
+[[bin]]
+name = "extract_images"
+path = "../scripts/extract_images.rs"
+required-features = ["video"]
+
+[features]
+default = ["video"]
+video = ["dep:ffmpeg-next", "dep:image"]
 
 [dependencies]
 # ffmpeg-next = { version = "9", features = ["build"], optional = true }
@@ -37,14 +38,19 @@ image = { version = "0.25", optional = true }
 reqwest = { version = "0.13", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+tempfile = "3.27"
 tokio = { version = "1.53", features = ["full"] }
 tracing = "0.1"
-tracing-subscriber = "0.3"
+ultralytics-inference = { version = "0.0", default-features = false, features = [
+  "annotate",
+] }
 uniffi.workspace = true
-ultralytics-inference = "0.0"
+tokio-stream = "0.1"
+futures = "0.3"
 
 [dev-dependencies]
 insta = "1.48"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }

@@ -16,9 +16,7 @@ impl Coordinate {
             self.lat, self.lon, self.lat, self.lon
         )
     }
-}
 
-impl Coordinate {
     #[allow(dead_code)]
     pub(crate) fn as_url_osm(&self) -> String {
         let lat = self.lat;
