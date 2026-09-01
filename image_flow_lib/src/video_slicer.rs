@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{ops::Deref, path::Path};
 
 use chrono::Duration;
 use ffmpeg_next::{
@@ -19,13 +19,22 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
     FramePath,
-    location::{coordinate_system::Coordinate, tabular_gps::DataPointsGPS},
+    location::{
+        coordinate_system::Coordinate,
+        tabular_gps::{BestMatchByDistance, DataPointsGPS, TabularGPS},
+    },
 };
-
-static ONCE: OnceCell<bool> = OnceCell::const_new();
 
 pub struct ImageGPSZip {
     zipped_content: Vec<(Coordinate, FramePath)>,
+}
+
+impl Deref for ImageGPSZip {
+    type Target = Vec<(Coordinate, FramePath)>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.zipped_content
+    }
 }
 
 impl ImageGPSZip {
@@ -45,20 +54,32 @@ impl ImageGPSZip {
             .await
         {
             let frame = frame?;
-            let cord = tabular_data.fetch(
-                frame.time_offset_from_first_frame,
-                Duration::milliseconds(400),
-            );
+            let offset = frame.time_offset_from_first_frame;
+            let cord = tabular_data
+                .fetch(offset, Duration::milliseconds(400))
+                .best_match_by_distance(offset)
+                .map(TabularGPS::coordinates);
 
-            frame_paths.push((Coordinate { lat: 0., lon: 0. }, frame));
+            if let Some(cord) = cord {
+                frame_paths.push((cord, frame));
+            }
         }
 
-        let return_value = Self {
+        Ok(Self {
             zipped_content: frame_paths,
-        };
-        Ok(return_value)
+        })
+    }
+
+    pub fn do_not_remove_frames(&mut self) {
+        for content in &mut self.zipped_content {
+            content
+                .1
+                .should_drop = false;
+        }
     }
 }
+
+static ONCE: OnceCell<bool> = OnceCell::const_new();
 
 /// # Panics
 /// If FFMPEG cant init this will crash surely.
@@ -302,15 +323,15 @@ impl VideoMetadata {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
     use chrono::Duration;
     use futures::StreamExt;
+    use std::path::Path;
     use tokio::fs;
 
     use crate::{
-        tests::video::SAMPLE_VIDEO_SOURCES,
-        video_slicer::{VideoMetadata, export_images_from_video},
+        location::tabular_gps::DataPointsGPS,
+        tests::video_data::SAMPLE_VIDEO_SOURCES,
+        video_slicer::{ImageGPSZip, VideoMetadata, export_images_from_video},
     };
 
     const ACCEPTED_DUR: Duration = Duration::seconds(1);
@@ -370,7 +391,7 @@ mod tests {
         let errors: Vec<String> = futures::future::join_all(
             SAMPLE_VIDEO_SOURCES
                 .iter()
-                .map(|&src| check_video(src)),
+                .map(|src| check_video(src.video_path)),
         )
         .await
         .into_iter()
@@ -378,5 +399,45 @@ mod tests {
         .collect();
 
         assert!(errors.is_empty(), "failures:\n{}", errors.join("\n"));
+    }
+
+    #[tokio::test]
+    async fn process_pipeline() {
+        for (index, gps_video_combo) in SAMPLE_VIDEO_SOURCES
+            .iter()
+            .enumerate()
+        {
+            let out_dir = Path::new(".")
+                .join("out")
+                .join("video_pipeline")
+                .join(format!("{index}"));
+
+            if out_dir.exists() {
+                std::fs::remove_dir_all(&out_dir).unwrap();
+            }
+            std::fs::create_dir_all(&out_dir).unwrap();
+
+            let raw_b = gps_video_combo
+                .csv_embed
+                .as_bytes();
+            let csv_gps_data = DataPointsGPS::from_csv(raw_b).unwrap();
+            let mut zipped = ImageGPSZip::from_video_and_gps(
+                gps_video_combo.video_path,
+                &csv_gps_data,
+                out_dir,
+                Duration::seconds(1),
+            )
+            .await
+            .unwrap();
+            zipped.do_not_remove_frames();
+
+            // TODO
+            // We should have the ability to call on each iteration: evaluate_context and pass in
+            // the image and the coordinate.
+            //
+            // The image should then be passed through computer vision
+            //
+            // The location can already be evaluated!
+        }
     }
 }

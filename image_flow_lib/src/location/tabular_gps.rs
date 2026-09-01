@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, ops::Deref};
 
 use chrono::{DateTime, Duration, TimeDelta, TimeZone, Utc};
 use serde::{Deserialize, Deserializer};
@@ -33,6 +33,14 @@ impl From<TabularGPS> for Coordinate {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct DataPointsGPS(Vec<TabularGPS>);
+
+impl Deref for DataPointsGPS {
+    type Target = Vec<TabularGPS>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 impl DataPointsGPS {
     /// # Errors
