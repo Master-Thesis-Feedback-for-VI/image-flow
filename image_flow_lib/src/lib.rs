@@ -22,17 +22,30 @@ pub(crate) mod tests;
 
 uniffi::setup_scaffolding!();
 
-use crate::{context::ContextCategory, location::coordinate_system::Coordinate};
+use crate::{
+    context::{ContextCategory, location_based_context::evaulate_location_into_categories},
+    error::ImageFlowError,
+    location::coordinate_system::Coordinate,
+};
 use chrono::Duration;
+use std::time::Duration as DefaultDuration;
+use std::{collections::HashSet, result::Result as DefaultResult};
 use std::{path::PathBuf, sync::Arc};
 
+/// TODO
+///
+/// # Errors
+/// TODO
 #[allow(clippy::needless_pass_by_value)]
 #[uniffi::export]
-#[must_use]
-pub fn evaluate_context(location: Coordinate, frame: Arc<FramePath>) -> ContextCategory {
-    let _ = location;
-    let _ = frame;
-    todo!()
+pub async fn evaluate_context(
+    location: Coordinate,
+    frame: Arc<FramePath>,
+) -> DefaultResult<Vec<ContextCategory>, ImageFlowError> {
+    evaluate_context_impl(location, frame.as_ref())
+        .await
+        .map(Vec::from_iter)
+        .map_err(ImageFlowError::from)
 }
 
 #[derive(Debug, uniffi::Object)]
@@ -50,7 +63,7 @@ impl FramePath {
     /// TODO
     #[uniffi::constructor]
     #[must_use]
-    pub fn new(offset: std::time::Duration, path: &str) -> Self {
+    pub fn new(offset: DefaultDuration, path: &str) -> Self {
         Self {
             time_offset_from_first_frame: Duration::from_std(offset)
                 .expect("The time conversion should not fail"),
@@ -58,6 +71,18 @@ impl FramePath {
             should_drop: true,
         }
     }
+}
+
+// === Implementations ===
+
+async fn evaluate_context_impl(
+    location: impl Into<Coordinate>,
+    frame: &FramePath,
+) -> crate::Result<HashSet<ContextCategory>> {
+    let mut categories = evaulate_location_into_categories(location).await?;
+    let _ = frame;
+
+    Ok(categories)
 }
 
 impl Drop for FramePath {

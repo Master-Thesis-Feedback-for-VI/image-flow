@@ -31,6 +31,7 @@ video = ["dep:ffmpeg-next", "dep:image"]
 # opencv = { version = "0.100", features = ["clang-runtime"] }
 # toml = { version = "1.1", features = ["serde"] }
 # uuid = { version = "1.24", features = ["v7", "serde"] }
+thiserror = "2"
 chrono = { version = "0.4", features = ["serde"] }
 csv = "1"
 ffmpeg-next = { version = "9", optional = true }

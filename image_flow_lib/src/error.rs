@@ -1,9 +1,81 @@
-use std::{error::Error as StdError, fmt, io};
+use std::{
+    error::Error as StdError,
+    fmt::{self, Display},
+    io,
+};
+
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+#[uniffi(flat_error)]
+pub enum ImageFlowError {
+    #[error("Request failed: {message}")]
+    Request { message: String },
+
+    #[error("Serialization failed: {message}")]
+    Serialization { message: String },
+
+    #[error("I/O failed: {message}")]
+    Io { message: String },
+
+    #[cfg(feature = "video")]
+    #[error("FFmpeg failed: {message}")]
+    Ffmpeg { message: String },
+}
+
+impl From<Error> for ImageFlowError {
+    fn from(error: Error) -> Self {
+        let message = error.to_string();
+
+        match error
+            .inner
+            .kind
+        {
+            Kind::Request => Self::Request { message },
+            Kind::Serialization => Self::Serialization { message },
+            Kind::Io => Self::Io { message },
+
+            #[cfg(feature = "video")]
+            Kind::Ffmpeg => Self::Ffmpeg { message },
+        }
+    }
+}
 
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub struct Error {
     inner: Box<Inner>,
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let kind = match self
+            .inner
+            .kind
+        {
+            Kind::Request => "request error",
+            Kind::Serialization => "serialization error",
+            Kind::Io => "I/O error",
+
+            #[cfg(feature = "video")]
+            Kind::Ffmpeg => "FFmpeg error",
+        };
+
+        match &self
+            .inner
+            .source
+        {
+            Some(source) => write!(f, "{kind}: {source}"),
+            None => f.write_str(kind),
+        }
+    }
+}
+
+impl StdError for Error {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        self.inner
+            .source
+            .as_deref()
+            .map(|source| source as _)
+    }
 }
 
 pub(crate) type BoxError = Box<dyn StdError + Send + Sync>;
