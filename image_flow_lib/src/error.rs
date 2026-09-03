@@ -4,6 +4,8 @@ use std::{
     io,
 };
 
+use ultralytics_inference::InferenceError;
+
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 #[uniffi(flat_error)]
 pub enum ImageFlowError {
@@ -196,5 +198,11 @@ impl From<ffmpeg_next::Error> for crate::Error {
 impl From<io::Error> for crate::Error {
     fn from(value: io::Error) -> Self {
         io(value)
+    }
+}
+
+impl From<InferenceError> for crate::Error {
+    fn from(value: InferenceError) -> Self {
+        image(value)
     }
 }

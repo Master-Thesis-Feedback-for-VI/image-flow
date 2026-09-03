@@ -15,6 +15,7 @@
     nasm
     git
     git-lfs
+    # python312Packages.ultralytics
   ];
 
   languages = {

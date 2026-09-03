@@ -2,18 +2,33 @@ use std::path::{Path, PathBuf};
 use std::time::Duration as DefaultDuration;
 
 use chrono::Duration;
+use tokio::sync::{Mutex, MutexGuard, OnceCell};
+use ultralytics_inference::{Results as DetectionResults, YOLOModel};
 
-use crate::context::location_based_context::UniqueGeographicCategories;
+
+static MODEL: OnceCell<Mutex<YOLOModel>> = OnceCell::const_new();
 
 /// TODO
 ///
 /// # Errors
 /// TODO
-pub fn evaluate_image_into_categories() -> crate::Result<UniqueGeographicCategories> {
-    todo!();
+pub async fn evaluate_image_into_categories(
+    frame_path: impl AsRef<Path>,
+) -> crate::Result<Vec<DetectionResults>> {
+    let path = frame_path
+        .as_ref()
+        .to_path_buf();
+    let handle = tokio::spawn(async move {
+        let results: Vec<DetectionResults> = lock_model()
+            .await?
+            .predict(path)?;
 
-    let ctx = UniqueGeographicCategories::new();
-    Ok(ctx)
+        Ok(results)
+    });
+
+    handle
+        .await
+        .map_err(crate::error::io)?
 }
 
 #[derive(Debug, uniffi::Object)]
@@ -61,4 +76,31 @@ impl Drop for FramePath {
             let _ = std::fs::remove_file(&self.path);
         }
     }
+}
+
+async fn model() -> crate::Result<&'static Mutex<YOLOModel>> {
+    MODEL
+        .get_or_try_init(|| async {
+            let model = tokio::task::spawn_blocking(|| YOLOModel::load("yolo26n.onnx"))
+                .await
+                .map_err(crate::error::io)? // JoinError -> crate::Error, unwrap outer layer
+                .map_err(crate::error::io)?; // InferenceError -> crate::Error, unwrap inner layer
+            Ok(Mutex::new(model)) // now `model` is a plain YOLOModel
+        })
+        .await
+}
+
+async fn lock_model() -> crate::Result<MutexGuard<'static, YOLOModel>> {
+    let model = model()
+        .await?
+        .lock()
+        .await;
+
+    Ok(model)
+}
+
+#[cfg(test)]
+mod tests {
+
+    
 }

@@ -6,6 +6,7 @@ use std::{
 
 use tokio::sync::Mutex;
 
+pub mod image_data;
 pub mod location_data;
 pub mod video_data;
 
@@ -19,36 +20,24 @@ const TEST_REMOVE_FILES_AFTER_RERUN: bool = match option_env!("TEST_REMOVE_FILES
 
 pub struct TestingFileManger {
     out_dir: Option<PathBuf>,
+    sample_dir: Option<PathBuf>,
+
+    all_images: Option<Vec<PathBuf>>,
 }
 
 impl TestingFileManger {
     const fn new() -> Self {
-        Self { out_dir: None }
+        Self {
+            out_dir: None,
+            sample_dir: None,
+            all_images: None,
+        }
     }
 
     pub fn out_dir(&mut self) -> &Path {
         self.out_dir
             .get_or_insert_with(|| {
-                let output = Command::new("cargo")
-                    .args(["locate-project", "--workspace", "--message-format", "plain"])
-                    .output()
-                    .unwrap();
-
-                assert!(
-                    output
-                        .status
-                        .success()
-                );
-
-                let manifest = PathBuf::from(
-                    String::from_utf8(output.stdout)
-                        .unwrap()
-                        .trim(),
-                )
-                .parent()
-                .unwrap()
-                .to_owned()
-                .join("out");
+                let manifest = Self::cargo_root().join("out");
 
                 if manifest.exists() && TEST_REMOVE_FILES_AFTER_RERUN {
                     fs::remove_dir_all(&manifest).unwrap();
@@ -69,6 +58,71 @@ impl TestingFileManger {
         fs::create_dir_all(&dir).unwrap();
 
         dir
+    }
+
+    pub fn all_images(&mut self) -> &[PathBuf] {
+        let image_dir = self
+            .image_dir()
+            .to_path_buf();
+
+        self.all_images
+            .get_or_insert_with(move || {
+                let entries = fs::read_dir(image_dir).unwrap();
+                entries
+                    .map(|val| val.unwrap())
+                    .filter(|pred| {
+                        let is_file = pred
+                            .file_type()
+                            .unwrap()
+                            .is_file();
+
+                        let valid_ext = pred
+                            .path()
+                            .extension()
+                            .map(|val| val == "png" || val == "jpg")
+                            .unwrap();
+
+                        is_file && valid_ext
+                    })
+                    .map(|val| val.path())
+                    .collect()
+            })
+    }
+
+    pub fn image_dir(&mut self) -> &Path {
+        self.sample_dir
+            .get_or_insert_with(|| {
+                let img_path = Self::cargo_root()
+                    .join("sample_data")
+                    .join("img");
+                assert!(img_path.exists());
+
+                img_path
+            })
+    }
+
+    fn cargo_root() -> PathBuf {
+        let output = Command::new("cargo")
+            .args(["locate-project", "--workspace", "--message-format", "plain"])
+            .output()
+            .unwrap();
+
+        assert!(
+            output
+                .status
+                .success()
+        );
+
+        let manifest = PathBuf::from(
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .trim(),
+        )
+        .parent()
+        .unwrap()
+        .to_owned();
+
+        manifest
     }
 }
 
