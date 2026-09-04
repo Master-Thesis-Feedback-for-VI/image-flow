@@ -6,7 +6,6 @@ use std::{
 
 use tokio::sync::Mutex;
 
-pub mod image_data;
 pub mod location_data;
 pub mod video_data;
 
@@ -68,7 +67,7 @@ impl TestingFileManger {
         self.all_images
             .get_or_insert_with(move || {
                 let entries = fs::read_dir(image_dir).unwrap();
-                entries
+                let mut files: Vec<PathBuf> = entries
                     .map(|val| val.unwrap())
                     .filter(|pred| {
                         let is_file = pred
@@ -85,7 +84,10 @@ impl TestingFileManger {
                         is_file && valid_ext
                     })
                     .map(|val| val.path())
-                    .collect()
+                    .collect();
+
+                files.sort();
+                files
             })
     }
 
@@ -113,16 +115,14 @@ impl TestingFileManger {
                 .success()
         );
 
-        let manifest = PathBuf::from(
+        PathBuf::from(
             String::from_utf8(output.stdout)
                 .unwrap()
                 .trim(),
         )
         .parent()
         .unwrap()
-        .to_owned();
-
-        manifest
+        .to_owned()
     }
 }
 
@@ -135,4 +135,17 @@ async fn instantiate_file_manager() {
     let fm = &mut *lock;
 
     fm.out_dir();
+}
+
+const AMOUNT_OF_IMAGES: usize = 9;
+
+#[allow(clippy::significant_drop_tightening)]
+#[tokio::test]
+async fn correct_amount_of_files() {
+    let mut binding = TESTING_FILE_MANAGER
+        .lock()
+        .await;
+    let image_files = binding.all_images();
+
+    assert_eq!(image_files.len(), AMOUNT_OF_IMAGES);
 }
