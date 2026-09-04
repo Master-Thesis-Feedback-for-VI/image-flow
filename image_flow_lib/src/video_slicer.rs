@@ -321,7 +321,6 @@ mod tests {
     use chrono::Duration;
     use futures::StreamExt;
     use std::path::Path;
-    use tokio::fs;
 
     use crate::{
         location::tabular_gps::DataPointsGPS,

@@ -1,3 +1,5 @@
+use std::fmt::Display;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::time::Duration as DefaultDuration;
 
@@ -6,29 +8,51 @@ use tokio::sync::{Mutex, MutexGuard, OnceCell};
 use tokio::task::JoinHandle;
 use ultralytics_inference::{Results as DetectionResults, YOLOModel};
 
+use crate::context::ContextCategory;
+
 static MODEL: OnceCell<Mutex<YOLOModel>> = OnceCell::const_new();
 
 /// TODO
 ///
 /// # Errors
 /// TODO
+///
+/// # Panics
+/// TODO
 pub async fn evaluate_image_into_categories(
     frame_path: impl AsRef<Path>,
-) -> crate::Result<Vec<DetectionResults>> {
+) -> crate::Result<Vec<ContextCategory>> {
     let path = frame_path
         .as_ref()
         .to_path_buf();
-    let handle: JoinHandle<crate::Result<Vec<DetectionResults>>> = tokio::spawn(async move {
-        let results: Vec<DetectionResults> = lock_model()
+    let handle: JoinHandle<crate::Result<DetectionResults>> = tokio::spawn(async move {
+        let mut results: Vec<DetectionResults> = lock_model()
             .await?
             .predict(path)?;
+        assert_eq!(results.len(), 1);
 
-        Ok(results)
+        let result = results.remove(0);
+        Ok(result)
     });
 
-    handle
+    let res = handle
         .await
-        .map_err(crate::error::io)?
+        .map_err(crate::error::io)??;
+    let image_detections = ImageDetections::from_detection_result(res);
+
+    let is_outside = image_detections.is_outside(&[
+        (DetectionType::TrafficLight, 1),
+        (DetectionType::Car, 1),
+        (DetectionType::Bench, 2),
+        (DetectionType::Bicycle, 1),
+    ]);
+    let outside = if is_outside {
+        ContextCategory::Outside
+    } else {
+        ContextCategory::Building
+    };
+
+    Ok(vec![outside])
 }
 
 #[derive(Debug, uniffi::Object)]
@@ -99,6 +123,7 @@ async fn lock_model() -> crate::Result<MutexGuard<'static, YOLOModel>> {
     Ok(model)
 }
 
+#[derive(Debug, Clone, PartialEq)]
 enum DetectionType {
     Person,
     TrafficLight,
@@ -126,20 +151,95 @@ impl DetectionType {
     }
 }
 
+#[derive(Debug, Clone)]
 struct Detection {
-    confidence: f64,
+    confidence: f32,
     name: DetectionType,
 }
 
-impl Detection {
-    // TODO
+#[derive(Debug, Clone)]
+struct ImageDetections {
+    detections: Vec<Detection>,
+}
+
+impl ImageDetections {
+    fn from_detection_result(res: DetectionResults) -> Self {
+        let mut detections = Vec::new();
+
+        if let Some(boxes) = res.boxes {
+            for i in 0..boxes.len() {
+                let cls = boxes.cls()[i] as usize;
+                let conf = boxes.conf()[i];
+                let name = res
+                    .names
+                    .get(&cls)
+                    .map_or("unknown", |s| s.as_str());
+
+                let detection = Detection {
+                    name: DetectionType::from_str(name),
+                    confidence: conf,
+                };
+                detections.push(detection);
+            }
+        }
+
+        Self { detections }
+    }
+
+    fn is_outside(&self, minimums: &[(DetectionType, usize)]) -> bool {
+        minimums
+            .iter()
+            .any(|(kind, minimum)| {
+                self.iter()
+                    .filter(|pred| pred.name == *kind)
+                    .count()
+                    >= *minimum
+            })
+    }
+}
+
+impl Display for ImageDetections {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let amount_detections = self
+            .detections
+            .len();
+        writeln!(f, "Amount of objects detected: {amount_detections}")?;
+        for (idx, detection) in self
+            .detections
+            .iter()
+            .enumerate()
+        {
+            write!(f, "\t{detection:?}")?;
+
+            if idx < amount_detections - 1 {
+                writeln!(f)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl From<DetectionResults> for ImageDetections {
+    fn from(value: DetectionResults) -> Self {
+        Self::from_detection_result(value)
+    }
+}
+
+impl Deref for ImageDetections {
+    type Target = Vec<Detection>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.detections
+    }
 }
 
 #[allow(clippy::significant_drop_tightening)]
 #[cfg(test)]
 mod tests {
     use crate::{
-        context::image_based_context::evaluate_image_into_categories, tests::TESTING_FILE_MANAGER,
+        context::{ContextCategory, image_based_context::evaluate_image_into_categories},
+        tests::TESTING_FILE_MANAGER,
     };
 
     #[tokio::test]
@@ -149,26 +249,16 @@ mod tests {
             .await;
         let image_files = binding.all_images();
 
-        for file_path in image_files {
-            let evaluations = evaluate_image_into_categories(file_path)
+        for image_path in image_files {
+            let evaluation = evaluate_image_into_categories(&image_path)
                 .await
                 .unwrap();
 
-            for res in &evaluations {
-                if let Some(boxes) = &res.boxes {
-                    println!("Found {} detections", boxes.len());
-                    for i in 0..boxes.len() {
-                        let cls = boxes.cls()[i] as usize;
-                        let conf = boxes.conf()[i];
-                        let name = res
-                            .names
-                            .get(&cls)
-                            .map_or("unknown", |s| s.as_str());
-
-                        println!("  {name} {conf:.2}");
-                    }
-                }
-            }
+            assert!(
+                evaluation.contains(&ContextCategory::Outside),
+                "This image: {}",
+                image_path.display()
+            );
         }
 
         panic!()
