@@ -54,24 +54,28 @@ pub async fn evaluate_image_into_categories(
         (DetectionType::Bicycle, 1),
         (DetectionType::DiningTable, 2),
     ]);
-    let outside = if is_outside {
-        ContextCategory::Outside
-    } else {
-        ContextCategory::Building
-    };
-    categories.insert(outside);
+    if is_outside {
+        categories.insert(ContextCategory::Outside);
+    }
 
     let in_forest = dominant_colors(&image, 7)
         .iter()
         .any(|color| color.is_close_to_forest_green());
     if in_forest {
-        categories.remove(&ContextCategory::Building);
         categories.insert(ContextCategory::Outside);
         categories.insert(ContextCategory::Forest);
-    } else {
-        categories.insert(ContextCategory::Building);
     }
 
+    let intersection_count = image_detections
+        .get_by_detected_object(DetectionType::TrafficLight)
+        .count();
+    if intersection_count > 5 {
+        categories.insert(ContextCategory::Intersection);
+    }
+
+    if !categories.contains(&ContextCategory::Outside) {
+        categories.insert(ContextCategory::Building);
+    }
     Ok(categories)
 }
 
@@ -204,6 +208,14 @@ impl ImageDetections {
         }
 
         Self { detections }
+    }
+
+    fn get_by_detected_object(
+        &self,
+        detection_type: DetectionType,
+    ) -> impl Iterator<Item = &Detection> {
+        self.iter()
+            .filter(move |pred| pred.name == detection_type)
     }
 
     fn is_outside(&self, minimums: &[(DetectionType, usize)]) -> bool {
