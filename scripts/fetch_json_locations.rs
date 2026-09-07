@@ -6,6 +6,7 @@ use image_flow::{
 use serde_json::json;
 use tokio::fs;
 
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 #[tokio::main]
 pub(crate) async fn main() {
     let places = HashMap::from([

@@ -17,6 +17,8 @@ pub mod video_slicer;
 
 pub use crate::error::{Error, Result};
 
+pub(crate) mod image_processor;
+
 #[cfg(test)]
 #[allow(dead_code)]
 pub(crate) mod tests;

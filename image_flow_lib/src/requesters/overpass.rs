@@ -189,7 +189,7 @@ pub async fn find_nearby_intersections<T: Into<Coordinate>>(
     intersections.sort_by(|a, b| {
         a.distance_m
             .partial_cmp(&b.distance_m)
-            .unwrap()
+            .unwrap_or(std::cmp::Ordering::Less)
     });
     Ok(intersections)
 }

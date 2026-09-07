@@ -1,14 +1,17 @@
+use std::collections::HashSet;
 use std::fmt::Display;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::time::Duration as DefaultDuration;
 
 use chrono::Duration;
+use image::DynamicImage;
 use tokio::sync::{Mutex, MutexGuard, OnceCell};
 use tokio::task::JoinHandle;
 use ultralytics_inference::{Results as DetectionResults, YOLOModel};
 
 use crate::context::ContextCategory;
+use crate::image_processor::dominant_colors;
 
 static MODEL: OnceCell<Mutex<YOLOModel>> = OnceCell::const_new();
 
@@ -21,21 +24,25 @@ static MODEL: OnceCell<Mutex<YOLOModel>> = OnceCell::const_new();
 /// TODO
 pub async fn evaluate_image_into_categories(
     frame_path: impl AsRef<Path>,
-) -> crate::Result<Vec<ContextCategory>> {
+) -> crate::Result<HashSet<ContextCategory>> {
     let path = frame_path
         .as_ref()
         .to_path_buf();
-    let handle: JoinHandle<crate::Result<DetectionResults>> = tokio::spawn(async move {
-        let mut results: Vec<DetectionResults> = lock_model()
-            .await?
-            .predict(path)?;
-        assert_eq!(results.len(), 1);
+    let handle: JoinHandle<crate::Result<(DetectionResults, DynamicImage)>> =
+        tokio::spawn(async move {
+            let mut results: Vec<DetectionResults> = lock_model()
+                .await?
+                .predict(&path)?;
+            assert_eq!(results.len(), 1);
 
-        let result = results.remove(0);
-        Ok(result)
-    });
+            let result = results.remove(0);
+            let image = image::open(&path)?;
+            Ok((result, image))
+        });
 
-    let res = handle
+    let mut categories = HashSet::new();
+
+    let (res, image) = handle
         .await
         .map_err(crate::error::io)??;
     let image_detections = ImageDetections::from_detection_result(res);
@@ -45,14 +52,27 @@ pub async fn evaluate_image_into_categories(
         (DetectionType::Car, 1),
         (DetectionType::Bench, 2),
         (DetectionType::Bicycle, 1),
+        (DetectionType::DiningTable, 2),
     ]);
     let outside = if is_outside {
         ContextCategory::Outside
     } else {
         ContextCategory::Building
     };
+    categories.insert(outside);
 
-    Ok(vec![outside])
+    let in_forest = dominant_colors(&image, 7)
+        .iter()
+        .any(|color| color.is_close_to_forest_green());
+    if in_forest {
+        categories.remove(&ContextCategory::Building);
+        categories.insert(ContextCategory::Outside);
+        categories.insert(ContextCategory::Forest);
+    } else {
+        categories.insert(ContextCategory::Building);
+    }
+
+    Ok(categories)
 }
 
 #[derive(Debug, uniffi::Object)]
@@ -239,6 +259,7 @@ impl Deref for ImageDetections {
 mod tests {
     use crate::{
         context::{ContextCategory, image_based_context::evaluate_image_into_categories},
+        image_processor::dominant_colors,
         tests::TESTING_FILE_MANAGER,
     };
 
@@ -248,19 +269,28 @@ mod tests {
             .lock()
             .await;
         let image_files = binding.all_images();
+        let mut missed_collector = Vec::new();
 
         for image_path in image_files {
             let evaluation = evaluate_image_into_categories(&image_path)
                 .await
                 .unwrap();
 
-            assert!(
-                evaluation.contains(&ContextCategory::Outside),
-                "This image: {}",
-                image_path.display()
-            );
+            let img = image::open(image_path).unwrap();
+            let dominate_colors = dominant_colors(&img, 4);
+
+            if !evaluation.contains(&ContextCategory::Outside) {
+                missed_collector.push((image_path.clone(), dominate_colors));
+            }
         }
 
-        panic!()
+        for (path, dom_colors) in &missed_collector {
+            println!("This image: {}\nIt contained these colors:", path.display());
+            for color in dom_colors {
+                println!("h, s, v = {color}");
+            }
+        }
+
+        assert_eq!(missed_collector.len(), 0);
     }
 }
