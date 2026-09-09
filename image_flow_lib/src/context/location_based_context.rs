@@ -128,6 +128,9 @@ impl ContextCategory {
 
         categories.extend(nominatim_categories);
         categories.extend(overpass_categories);
+        if categories.contains(&Self::Building) {
+            categories = Self::remove_outside_categories(categories);
+        }
         categories
     }
 }
