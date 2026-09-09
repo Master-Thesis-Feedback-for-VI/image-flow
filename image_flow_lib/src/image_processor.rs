@@ -1,9 +1,34 @@
 use std::fmt::Display;
+use std::ops::Deref;
 
 use image::DynamicImage;
 use kmeans_colors::{Kmeans, Sort, get_kmeans};
 use palette::cast::from_component_slice;
 use palette::{Hsv, IntoColor, Lab, Srgb};
+
+const FOREST_GREEN: Srgb<u8> = Srgb::new(32, 150, 32);
+
+pub struct DominantColors {
+    colors: Vec<DominantColor>,
+}
+
+impl Deref for DominantColors {
+    type Target = Vec<DominantColor>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.colors
+    }
+}
+
+impl FromIterator<DominantColor> for DominantColors {
+    fn from_iter<I: IntoIterator<Item = DominantColor>>(iter: I) -> Self {
+        let colors = iter
+            .into_iter()
+            .collect();
+
+        Self { colors }
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct DominantColor {
@@ -66,8 +91,6 @@ impl DominantColor {
     }
 
     pub fn is_close_to_forest_green(self) -> bool {
-        const FOREST_GREEN: Srgb<u8> = Srgb::new(32, 150, 32);
-
         self.is_close_to_color(FOREST_GREEN, 60.0, 0.80, 0.80)
     }
 }
@@ -88,7 +111,7 @@ impl Display for DominantColor {
     }
 }
 
-pub fn dominant_colors(image: &DynamicImage, amount: usize) -> Vec<DominantColor> {
+pub fn dominant_colors(image: &DynamicImage, amount: usize) -> DominantColors {
     let rgb_image = image.to_rgb8();
     let pixels = rgb_image.into_raw();
 

@@ -5,13 +5,23 @@ use std::path::{Path, PathBuf};
 use std::time::Duration as DefaultDuration;
 
 use chrono::Duration;
-use image::DynamicImage;
 use tokio::sync::{Mutex, MutexGuard, OnceCell};
 use tokio::task::JoinHandle;
 use ultralytics_inference::{Results as DetectionResults, YOLOModel};
 
 use crate::context::ContextCategory;
-use crate::image_processor::dominant_colors;
+use crate::image_processor::{DominantColors, dominant_colors};
+
+const DOMINANT_COLOR_AMOUNT: usize = 7;
+const TRAFFIC_LIGHT_THRESHOLD: usize = 8;
+const OUTSIDE_THRESHOLD: &[(DetectionType, usize)] = &[
+    (DetectionType::Person, 7),
+    (DetectionType::TrafficLight, 1),
+    (DetectionType::Car, 1),
+    (DetectionType::Bench, 2),
+    (DetectionType::Bicycle, 1),
+    (DetectionType::DiningTable, 2),
+];
 
 static MODEL: OnceCell<Mutex<YOLOModel>> = OnceCell::const_new();
 
@@ -19,46 +29,77 @@ static MODEL: OnceCell<Mutex<YOLOModel>> = OnceCell::const_new();
 ///
 /// # Errors
 /// TODO
-///
-/// # Panics
-/// TODO
 pub async fn evaluate_image_into_categories(
     frame_path: impl AsRef<Path>,
 ) -> crate::Result<HashSet<ContextCategory>> {
+    let frame_path = frame_path
+        .as_ref()
+        .to_path_buf();
+    tokio::spawn(async move {
+        let image_detections = detect_objects_in_image(&frame_path).await?;
+
+        let img = image::open(&frame_path)?;
+        let dominant_colors = dominant_colors(&img, DOMINANT_COLOR_AMOUNT);
+        Ok(evaluate_image_into_categories_impl(
+            &dominant_colors,
+            &image_detections,
+        ))
+    })
+    .await
+    .map_err(crate::error::io)?
+}
+
+/// TODO
+/// # Errors
+/// TODO
+///
+/// # Panics
+/// TODO
+pub async fn detect_objects_in_image(
+    frame_path: impl AsRef<Path>,
+) -> crate::Result<ImageDetections> {
     let path = frame_path
         .as_ref()
         .to_path_buf();
-    let handle: JoinHandle<crate::Result<(DetectionResults, DynamicImage)>> =
-        tokio::spawn(async move {
-            let mut results: Vec<DetectionResults> = lock_model()
-                .await?
-                .predict(&path)?;
-            assert_eq!(results.len(), 1);
+    let handle: JoinHandle<crate::Result<DetectionResults>> = tokio::spawn(async move {
+        let mut results: Vec<DetectionResults> = lock_model()
+            .await?
+            .predict(&path)?;
+        assert_eq!(results.len(), 1);
 
-            let result = results.remove(0);
-            let image = image::open(&path)?;
-            Ok((result, image))
-        });
+        let result = results.remove(0);
+        Ok(result)
+    });
 
-    let mut categories = HashSet::new();
-
-    let (res, image) = handle
+    let res = handle
         .await
         .map_err(crate::error::io)??;
     let image_detections = ImageDetections::from_detection_result(res);
 
-    let is_outside = image_detections.is_outside(&[
-        (DetectionType::TrafficLight, 1),
-        (DetectionType::Car, 1),
-        (DetectionType::Bench, 2),
-        (DetectionType::Bicycle, 1),
-        (DetectionType::DiningTable, 2),
-    ]);
+    Ok(image_detections)
+}
+
+/// TODO
+#[must_use]
+pub fn evaluate_image_into_categories_impl(
+    dominant_colors: &DominantColors,
+    detections: &ImageDetections,
+) -> HashSet<ContextCategory> {
+    let mut categories = HashSet::new();
+
+    let is_outside = detections.is_outside(OUTSIDE_THRESHOLD);
     if is_outside {
         categories.insert(ContextCategory::Outside);
     }
 
-    let in_forest = dominant_colors(&image, 7)
+    let intersection_count = detections
+        .get_by_detected_object(DetectionType::TrafficLight)
+        .count();
+    if intersection_count > TRAFFIC_LIGHT_THRESHOLD {
+        categories.insert(ContextCategory::Intersection);
+    }
+
+    let in_forest = dominant_colors
         .iter()
         .any(|color| color.is_close_to_forest_green());
     if in_forest {
@@ -66,17 +107,11 @@ pub async fn evaluate_image_into_categories(
         categories.insert(ContextCategory::Forest);
     }
 
-    let intersection_count = image_detections
-        .get_by_detected_object(DetectionType::TrafficLight)
-        .count();
-    if intersection_count > 5 {
-        categories.insert(ContextCategory::Intersection);
-    }
-
     if !categories.contains(&ContextCategory::Outside) {
         categories.insert(ContextCategory::Building);
     }
-    Ok(categories)
+
+    categories
 }
 
 #[derive(Debug, uniffi::Object)]
@@ -176,13 +211,13 @@ impl DetectionType {
 }
 
 #[derive(Debug, Clone)]
-struct Detection {
+pub struct Detection {
     confidence: f32,
     name: DetectionType,
 }
 
 #[derive(Debug, Clone)]
-struct ImageDetections {
+pub struct ImageDetections {
     detections: Vec<Detection>,
 }
 
@@ -270,9 +305,9 @@ impl Deref for ImageDetections {
 #[cfg(test)]
 mod tests {
     use crate::{
-        context::{ContextCategory, image_based_context::evaluate_image_into_categories},
+        context::image_based_context::evaluate_image_into_categories,
         image_processor::dominant_colors,
-        tests::TESTING_FILE_MANAGER,
+        tests::{TESTING_FILE_MANAGER, TestingImage},
     };
 
     #[tokio::test]
@@ -281,28 +316,32 @@ mod tests {
             .lock()
             .await;
         let image_files = binding.all_images();
-        let mut missed_collector = Vec::new();
 
-        for image_path in image_files {
-            let evaluation = evaluate_image_into_categories(&image_path)
+        for TestingImage {
+            img_path,
+            categories,
+        } in image_files
+        {
+            let evaluation = evaluate_image_into_categories(&img_path)
                 .await
                 .unwrap();
 
-            let img = image::open(image_path).unwrap();
-            let dominate_colors = dominant_colors(&img, 4);
+            let img = image::open(img_path).unwrap();
+            let dominate_colors = dominant_colors(&img, 7);
 
-            if !evaluation.contains(&ContextCategory::Outside) {
-                missed_collector.push((image_path.clone(), dominate_colors));
+            for category in categories {
+                if !evaluation.contains(category) {
+                    println!(
+                        "This image: {}\nIt contained these colors:",
+                        img_path.display()
+                    );
+                    for color in dominate_colors.iter() {
+                        println!("h, s, v = {color}");
+                    }
+
+                    panic!();
+                }
             }
         }
-
-        for (path, dom_colors) in &missed_collector {
-            println!("This image: {}\nIt contained these colors:", path.display());
-            for color in dom_colors {
-                println!("h, s, v = {color}");
-            }
-        }
-
-        assert_eq!(missed_collector.len(), 0);
     }
 }

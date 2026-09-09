@@ -6,6 +6,8 @@ use std::{
 
 use tokio::sync::Mutex;
 
+use crate::context::ContextCategory;
+
 pub mod location_data;
 pub mod video_data;
 
@@ -17,11 +19,17 @@ const TEST_REMOVE_FILES_AFTER_RERUN: bool = match option_env!("TEST_REMOVE_FILES
     Some(_) | None => true,
 };
 
+#[derive(Clone, Debug)]
+pub struct TestingImage {
+    pub img_path: PathBuf,
+    pub categories: Vec<ContextCategory>,
+}
+
 pub struct TestingFileManger {
     out_dir: Option<PathBuf>,
     sample_dir: Option<PathBuf>,
 
-    all_images: Option<Vec<PathBuf>>,
+    all_images: Option<Vec<TestingImage>>,
 }
 
 impl TestingFileManger {
@@ -59,35 +67,52 @@ impl TestingFileManger {
         dir
     }
 
-    pub fn all_images(&mut self) -> &[PathBuf] {
+    pub fn all_images(&mut self) -> &[TestingImage] {
         let image_dir = self
             .image_dir()
             .to_path_buf();
 
         self.all_images
             .get_or_insert_with(move || {
-                let entries = fs::read_dir(image_dir).unwrap();
-                let mut files: Vec<PathBuf> = entries
-                    .map(|val| val.unwrap())
-                    .filter(|pred| {
-                        let is_file = pred
-                            .file_type()
-                            .unwrap()
-                            .is_file();
+                let folders = [
+                    (image_dir.join("outside"), ContextCategory::Outside),
+                    (image_dir.join("forest"), ContextCategory::Forest),
+                ];
 
-                        let valid_ext = pred
-                            .path()
-                            .extension()
-                            .map(|val| val == "png" || val == "jpg")
-                            .unwrap();
+                folders
+                    .iter()
+                    .flat_map(|(dir_path, ctx_cat)| {
+                        let entries = fs::read_dir(dir_path).unwrap();
+                        let mut files: Vec<TestingImage> = entries
+                            .map(|val| val.unwrap())
+                            .filter(|pred| {
+                                let is_file = pred
+                                    .file_type()
+                                    .unwrap()
+                                    .is_file();
 
-                        is_file && valid_ext
+                                let valid_ext = pred
+                                    .path()
+                                    .extension()
+                                    .is_some_and(|val| val == "png" || val == "jpg");
+
+                                is_file && valid_ext
+                            })
+                            .map(|val| TestingImage {
+                                img_path: val.path(),
+                                categories: ctx_cat
+                                    .implied_additional_categories()
+                                    .to_vec(),
+                            })
+                            .collect();
+
+                        files.sort_by(|a, b| {
+                            a.img_path
+                                .cmp(&b.img_path)
+                        });
+                        files
                     })
-                    .map(|val| val.path())
-                    .collect();
-
-                files.sort();
-                files
+                    .collect()
             })
     }
 
@@ -126,6 +151,8 @@ impl TestingFileManger {
     }
 }
 
+const AMOUNT_OF_IMAGES: usize = 8;
+
 #[allow(clippy::significant_drop_tightening)]
 #[tokio::test]
 async fn instantiate_file_manager() {
@@ -137,8 +164,6 @@ async fn instantiate_file_manager() {
     fm.out_dir();
 }
 
-const AMOUNT_OF_IMAGES: usize = 9;
-
 #[allow(clippy::significant_drop_tightening)]
 #[tokio::test]
 async fn correct_amount_of_files() {
@@ -147,5 +172,9 @@ async fn correct_amount_of_files() {
         .await;
     let image_files = binding.all_images();
 
-    assert_eq!(image_files.len(), AMOUNT_OF_IMAGES);
+    assert_eq!(
+        image_files.len(),
+        AMOUNT_OF_IMAGES,
+        "These files where found: {image_files:?}"
+    );
 }

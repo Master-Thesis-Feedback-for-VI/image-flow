@@ -18,3 +18,18 @@ pub enum ContextCategory {
 
     Elevator,
 }
+
+impl ContextCategory {
+    #[must_use]
+    pub const fn implied_additional_categories(self) -> &'static [Self] {
+        match self {
+            Self::Forest => &[Self::Outside, Self::Forest],
+            Self::Outside => &[Self::Outside],
+            Self::Building => &[Self::Building],
+            Self::Street => &[Self::Outside, Self::Street],
+            Self::Pedestrian => &[Self::Outside, Self::Pedestrian],
+            Self::Intersection => &[Self::Outside, Self::Intersection],
+            Self::Elevator => &[Self::Elevator],
+        }
+    }
+}
