@@ -3,7 +3,10 @@ use std::collections::HashSet;
 use crate::{
     context::ContextCategory,
     location::coordinate_system::Coordinate,
-    requesters::{nominatim::NominatimLocationData, overpass::find_nearby_intersections},
+    requesters::{
+        nominatim::NominatimLocationData,
+        overpass::{find_nearby_intersections, inside_building},
+    },
 };
 
 const MIN_INTERSECTION_NODES: usize = 2;
@@ -14,7 +17,7 @@ const MIN_INTERSECTION_NODES: usize = 2;
 /// TODO
 pub async fn evaluate_location_into_categories<T: Into<Coordinate>>(
     pos: T,
-) -> crate::Result<UniqueGeographicCategories> {
+) -> UniqueGeographicCategories {
     ContextCategory::from_cords(pos).await
 }
 
@@ -85,38 +88,54 @@ impl ContextCategory {
         Ok(categories)
     }
 
-    async fn extract_categories_from_overpass<T: Into<Coordinate>>(
-        coordinates: T,
-    ) -> crate::Result<UniqueGeographicCategories> {
+    async fn extract_categories_from_overpass<T>(coordinates: T) -> UniqueGeographicCategories
+    where
+        T: Into<Coordinate> + Copy,
+    {
         let mut categories = HashSet::new();
 
-        let intersections = find_nearby_intersections(coordinates, 50.).await?;
-        if intersections.len() >= MIN_INTERSECTION_NODES {
+        let intersections = find_nearby_intersections(coordinates, 50.).await;
+        if let Ok(intersections) = intersections
+            && intersections.len() >= MIN_INTERSECTION_NODES
+        {
             categories.insert(Self::Intersection);
+            categories.insert(Self::Outside);
         }
 
-        Ok(categories)
+        let inside_building = inside_building(coordinates).await;
+        if let Ok(inside_building) = inside_building {
+            categories.insert(inside_building);
+        }
+
+        categories
     }
 
     /// TODO
     ///
     /// # Errors
     /// TODO
-    pub async fn from_cords<T: Into<Coordinate>>(
-        coordinates: T,
-    ) -> crate::Result<UniqueGeographicCategories> {
+    pub async fn from_cords<T>(coordinates: T) -> UniqueGeographicCategories
+    where
+        T: Into<Coordinate>,
+    {
         let coordinates: Coordinate = coordinates.into();
+        let mut categories = HashSet::new();
 
-        let mut categories = Self::extract_categories_from_nominatim(coordinates).await?;
-        let overpass_categories = Self::extract_categories_from_overpass(coordinates).await?;
+        let nominatim_categories = Self::extract_categories_from_nominatim(coordinates)
+            .await
+            .unwrap_or_else(|_| HashSet::new());
+        let overpass_categories = Self::extract_categories_from_overpass(coordinates).await;
 
+        categories.extend(nominatim_categories);
         categories.extend(overpass_categories);
-        Ok(categories)
+        categories
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use crate::{
         context::ContextCategory,
         location::coordinate_system::Coordinate,
@@ -172,19 +191,10 @@ mod tests {
         "#);
         insta::assert_snapshot!(&nom_data.as_coordinate().as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3715399&mlon=9.7125486#map=17/52.3715399/9.7125486");
 
-        let categories = ContextCategory::from_cords(element.1)
-            .await
-            .unwrap();
-        let mut vec_categories: Vec<ContextCategory> = categories
-            .into_iter()
-            .collect();
-        vec_categories.sort();
-        insta::assert_debug_snapshot!(vec_categories, @"
-        [
-            Building,
-            Intersection,
-        ]
-        ");
+        let should_categories = HashSet::from([ContextCategory::Building]);
+        let categories = ContextCategory::from_cords(element.1).await;
+
+        assert_eq!(should_categories, categories);
     }
 
     #[tokio::test]
@@ -219,28 +229,20 @@ mod tests {
         "#);
         insta::assert_snapshot!(&nom_data.as_coordinate().as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3860214&mlon=9.8088121#map=17/52.3860214/9.8088121");
 
-        let categories = ContextCategory::from_cords(element.1)
-            .await
-            .unwrap();
-        let mut vec_categories: Vec<ContextCategory> = categories
-            .into_iter()
-            .collect();
-        vec_categories.sort();
-        insta::assert_debug_snapshot!(vec_categories, @"
-        [
-            Street,
-            Intersection,
-        ]
-        ");
+        let should_category = HashSet::from([
+            ContextCategory::Outside,
+            ContextCategory::Street,
+            ContextCategory::Intersection,
+        ]);
+        let categories = ContextCategory::from_cords(element.1).await;
+        assert_eq!(should_category, categories);
     }
 
     #[tokio::test]
     async fn intersections() {
         let intersection_locations = INTERSECTION_LOCATIONS;
         for (name, location) in intersection_locations {
-            let categories = ContextCategory::extract_categories_from_overpass(*location)
-                .await
-                .unwrap();
+            let categories = ContextCategory::extract_categories_from_overpass(*location).await;
 
             let url = location.as_url_osm();
             assert!(
@@ -256,9 +258,7 @@ mod tests {
                 lon: 9.781_501,
             },
         );
-        let categories = ContextCategory::extract_categories_from_overpass(no_intersection.1)
-            .await
-            .unwrap();
+        let categories = ContextCategory::extract_categories_from_overpass(no_intersection.1).await;
 
         let name = no_intersection.0;
         let url = no_intersection

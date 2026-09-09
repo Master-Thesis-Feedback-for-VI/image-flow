@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 pub mod image_based_context;
 pub mod location_based_context;
 
@@ -31,5 +33,13 @@ impl ContextCategory {
             Self::Intersection => &[Self::Outside, Self::Intersection],
             Self::Elevator => &[Self::Elevator],
         }
+    }
+
+    pub fn remove_outside_categories(categories: impl IntoIterator<Item = Self>) -> HashSet<Self> {
+        let inside_comp_cat = HashSet::from([Self::Outside, Self::Elevator]);
+        categories
+            .into_iter()
+            .filter(move |pred| inside_comp_cat.contains(pred))
+            .collect()
     }
 }
