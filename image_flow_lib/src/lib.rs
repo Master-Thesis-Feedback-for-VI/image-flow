@@ -27,14 +27,14 @@ uniffi::setup_scaffolding!();
 
 use crate::{
     context::{
-        ContextCategory, image_based_context::FramePath,
+        ContextCategory,
+        image_based_context::{FramePath, evaluate_image_into_categories},
         location_based_context::evaluate_location_into_categories,
     },
-    error::ImageFlowError,
     location::coordinate_system::Coordinate,
 };
+use std::collections::HashSet;
 use std::sync::Arc;
-use std::{collections::HashSet, result::Result as DefaultResult};
 
 /// TODO
 ///
@@ -42,14 +42,11 @@ use std::{collections::HashSet, result::Result as DefaultResult};
 /// TODO
 #[allow(clippy::needless_pass_by_value)]
 #[uniffi::export]
-pub async fn evaluate_context(
-    location: Coordinate,
-    frame: Arc<FramePath>,
-) -> DefaultResult<Vec<ContextCategory>, ImageFlowError> {
+pub async fn evaluate_context(location: Coordinate, frame: Arc<FramePath>) -> Vec<ContextCategory> {
     evaluate_context_impl(location, frame.as_ref())
         .await
-        .map(Vec::from_iter)
-        .map_err(ImageFlowError::from)
+        .into_iter()
+        .collect()
 }
 
 // === Implementations ===
@@ -57,9 +54,26 @@ pub async fn evaluate_context(
 async fn evaluate_context_impl(
     location: impl Into<Coordinate>,
     frame: &FramePath,
-) -> crate::Result<HashSet<ContextCategory>> {
-    let categories = evaluate_location_into_categories(location).await?;
-    let _ = frame;
+) -> HashSet<ContextCategory> {
+    let mut categories = evaluate_location_into_categories(location).await;
+    let image_categories = evaluate_image_into_categories(frame)
+        .await
+        .unwrap_or_default();
 
-    Ok(categories)
+    categories.extend(image_categories);
+
+    let mut categories: HashSet<ContextCategory> = categories
+        .into_iter()
+        .flat_map(|val| {
+            val.implied_additional_categories()
+                .iter()
+                .copied()
+        })
+        .collect();
+
+    if categories.contains(&ContextCategory::Building) {
+        categories = ContextCategory::remove_outside_categories(categories);
+    }
+
+    categories
 }

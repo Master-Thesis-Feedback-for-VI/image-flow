@@ -3,7 +3,10 @@ use serde::Deserialize;
 use std::{collections::HashSet, fmt::Write, sync::LazyLock};
 use tokio::time::Duration;
 
-use crate::{error, location::coordinate_system::Coordinate, requesters::client::throttled_post};
+use crate::{
+    context::ContextCategory, error, location::coordinate_system::Coordinate,
+    requesters::client::throttled_post,
+};
 
 // ===== Configuration =====
 
@@ -27,13 +30,8 @@ const ROAD_TYPES: &str =
 ///
 /// # Errors
 /// TODO
-pub async fn fetch_raw_overpass_data<T: Into<Coordinate>>(
-    coordinates: T,
-    radius_m: f64,
-) -> crate::Result<serde_json::Value> {
-    let query = build_query(coordinates, radius_m);
-
-    let body = format!("data={}", urlencoding_encode(&query));
+pub async fn fetch_raw_overpass_data(query: &str) -> crate::Result<serde_json::Value> {
+    let body = format!("data={}", urlencoding_encode(query));
 
     let urls = *OVERPASS_URLS;
     let mut last_error = None;
@@ -104,7 +102,7 @@ impl From<Intersection> for Coordinate {
     }
 }
 
-fn build_query<T: Into<Coordinate>>(coordinates: T, radius_m: f64) -> String {
+fn build_intersections_query<T: Into<Coordinate>>(coordinates: T, radius_m: f64) -> String {
     let coordinates: Coordinate = coordinates.into();
     let lat = coordinates.lat;
     let lon = coordinates.lon;
@@ -155,16 +153,35 @@ fn urlencoding_encode(input: &str) -> String {
     out
 }
 
-pub async fn find_nearby_intersections<T: Into<Coordinate>>(
-    coordinates: T,
+pub async fn inside_building(coordinates: impl Into<Coordinate>) -> crate::Result<ContextCategory> {
+    let Coordinate { lat, lon } = coordinates.into();
+
+    let query = format!("[out:json];is_in({lat},{lon});way._[building];out tags;");
+    let resp = fetch_raw_overpass_data(&query).await?;
+    let empty_building = resp["elements"]
+        .as_array()
+        .cloned()
+        .is_some_and(|val| val.is_empty());
+
+    let ctx = if empty_building {
+        ContextCategory::Outside
+    } else {
+        ContextCategory::Building
+    };
+    Ok(ctx)
+}
+
+pub async fn find_nearby_intersections(
+    coordinates: impl Into<Coordinate>,
     radius_m: f64,
 ) -> crate::Result<Vec<Intersection>> {
     let coordinates: Coordinate = coordinates.into();
     let lat = coordinates.lat;
     let lon = coordinates.lon;
-    let parsed: OverpassResponse =
-        serde_json::from_value(fetch_raw_overpass_data(coordinates, radius_m).await?)
-            .map_err(error::serialization)?;
+    let query = build_intersections_query(coordinates, radius_m);
+
+    let parsed: OverpassResponse = serde_json::from_value(fetch_raw_overpass_data(&query).await?)
+        .map_err(error::serialization)?;
 
     let mut seen_node_ids = HashSet::new();
     let mut intersections: Vec<Intersection> = parsed
