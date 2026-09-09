@@ -62,7 +62,9 @@ pub async fn throttle() {
             sleep(
                 MIN_INTERVAL
                     .checked_sub(elapsed)
-                    .unwrap(),
+                    .expect(
+                        "the time can not be less if this EVER happens we should talk about it",
+                    ),
             )
             .await;
         }

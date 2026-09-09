@@ -12,7 +12,7 @@ const MIN_INTERSECTION_NODES: usize = 2;
 ///
 /// # Errors
 /// TODO
-pub async fn evaulate_location_into_categories<T: Into<Coordinate>>(
+pub async fn evaluate_location_into_categories<T: Into<Coordinate>>(
     pos: T,
 ) -> crate::Result<UniqueGeographicCategories> {
     ContextCategory::from_cords(pos).await

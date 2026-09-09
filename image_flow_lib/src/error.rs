@@ -4,6 +4,8 @@ use std::{
     io,
 };
 
+use ultralytics_inference::InferenceError;
+
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 #[uniffi(flat_error)]
 pub enum ImageFlowError {
@@ -15,6 +17,9 @@ pub enum ImageFlowError {
 
     #[error("I/O failed: {message}")]
     Io { message: String },
+
+    #[error("Image failure: {message}")]
+    Image { message: String },
 
     #[cfg(feature = "video")]
     #[error("FFmpeg failed: {message}")]
@@ -32,6 +37,7 @@ impl From<Error> for ImageFlowError {
             Kind::Request => Self::Request { message },
             Kind::Serialization => Self::Serialization { message },
             Kind::Io => Self::Io { message },
+            Kind::Image => Self::Image { message },
 
             #[cfg(feature = "video")]
             Kind::Ffmpeg => Self::Ffmpeg { message },
@@ -54,6 +60,7 @@ impl Display for Error {
             Kind::Request => "request error",
             Kind::Serialization => "serialization error",
             Kind::Io => "I/O error",
+            Kind::Image => "Image failure",
 
             #[cfg(feature = "video")]
             Kind::Ffmpeg => "FFmpeg error",
@@ -91,6 +98,7 @@ pub(crate) enum Kind {
     Request,
     Serialization,
     Io,
+    Image,
 
     #[cfg(feature = "video")]
     Ffmpeg,
@@ -140,6 +148,13 @@ where
     Error::new(Kind::Io, Some(e))
 }
 
+pub(crate) fn image<E>(e: E) -> Error
+where
+    E: Into<BoxError>,
+{
+    Error::new(Kind::Image, Some(e))
+}
+
 impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut builder = f.debug_struct("image_flow::Error");
@@ -167,6 +182,12 @@ impl From<serde_json::Error> for crate::Error {
     }
 }
 
+impl From<image::ImageError> for crate::Error {
+    fn from(value: image::ImageError) -> Self {
+        image(value)
+    }
+}
+
 #[cfg(feature = "video")]
 impl From<ffmpeg_next::Error> for crate::Error {
     fn from(value: ffmpeg_next::Error) -> Self {
@@ -177,5 +198,11 @@ impl From<ffmpeg_next::Error> for crate::Error {
 impl From<io::Error> for crate::Error {
     fn from(value: io::Error) -> Self {
         io(value)
+    }
+}
+
+impl From<InferenceError> for crate::Error {
+    fn from(value: InferenceError) -> Self {
+        image(value)
     }
 }

@@ -214,12 +214,7 @@ fn decode_and_send(
                             debug!(path = %frame_path_disp, "frame saved");
                         }
 
-                        // Stop decoding early if the receiver was dropped.
-                        let tmp_frame_path = FramePath {
-                            time_offset_from_first_frame: current_pts_time,
-                            path: frame_path,
-                            should_drop: true,
-                        };
+                        let tmp_frame_path = FramePath::new_impl(current_pts_time, frame_path);
                         if tx
                             .blocking_send(Ok(tmp_frame_path))
                             .is_err()
@@ -326,7 +321,6 @@ mod tests {
     use chrono::Duration;
     use futures::StreamExt;
     use std::path::Path;
-    use tokio::fs;
 
     use crate::{
         location::tabular_gps::DataPointsGPS,

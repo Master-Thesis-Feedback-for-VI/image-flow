@@ -24,18 +24,20 @@ required-features = ["video"]
 
 [features]
 default = ["video"]
-video = ["dep:ffmpeg-next", "dep:image"]
+video = ["dep:ffmpeg-next"]
 
 [dependencies]
 # ffmpeg-next = { version = "9", features = ["build"], optional = true }
 # opencv = { version = "0.100", features = ["clang-runtime"] }
 # toml = { version = "1.1", features = ["serde"] }
 # uuid = { version = "1.24", features = ["v7", "serde"] }
+kmeans_colors = { version = "0.7", default-features = false, features = ["palette_color"]}
+palette = "0.7"
 thiserror = "2"
 chrono = { version = "0.4", features = ["serde"] }
 csv = "1"
 ffmpeg-next = { version = "9", optional = true }
-image = { version = "0.25", optional = true }
+image = { version = "0.25" }
 reqwest = { version = "0.13", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -62,3 +64,4 @@ pedantic = { level = "deny", priority = -1 }
 perf = { level = "deny", priority = -1 }
 style = { level = "deny", priority = -1 }
 suspicious = { level = "deny", priority = -1 }
+unwrap_used = "deny"
