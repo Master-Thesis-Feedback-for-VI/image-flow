@@ -67,12 +67,13 @@ impl TestingFileManger {
         dir
     }
 
-    pub fn all_images(&mut self) -> &[TestingImage] {
+    pub fn all_images(&mut self) -> Vec<TestingImage> {
         let image_dir = self
             .image_dir()
             .to_path_buf();
 
-        self.all_images
+        let images = self
+            .all_images
             .get_or_insert_with(move || {
                 let folders = [
                     (image_dir.join("outside"), ContextCategory::Outside),
@@ -113,7 +114,8 @@ impl TestingFileManger {
                         files
                     })
                     .collect()
-            })
+            });
+        images.clone()
     }
 
     pub fn image_dir(&mut self) -> &Path {

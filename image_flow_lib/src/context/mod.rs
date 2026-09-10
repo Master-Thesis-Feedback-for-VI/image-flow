@@ -36,7 +36,7 @@ impl ContextCategory {
     }
 
     pub fn remove_outside_categories(categories: impl IntoIterator<Item = Self>) -> HashSet<Self> {
-        let inside_comp_cat = HashSet::from([Self::Outside, Self::Elevator]);
+        let inside_comp_cat = HashSet::from([Self::Building, Self::Elevator]);
         categories
             .into_iter()
             .filter(move |pred| inside_comp_cat.contains(pred))

@@ -312,15 +312,17 @@ mod tests {
 
     #[tokio::test]
     async fn check_detections() {
-        let mut binding = TESTING_FILE_MANAGER
-            .lock()
-            .await;
-        let image_files = binding.all_images();
+        let image_files = {
+            let mut binding = TESTING_FILE_MANAGER
+                .lock()
+                .await;
+            binding.all_images()
+        };
 
         for TestingImage {
             img_path,
             categories,
-        } in image_files
+        } in &image_files
         {
             let evaluation = evaluate_image_into_categories(&img_path)
                 .await

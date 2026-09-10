@@ -341,10 +341,12 @@ mod tests {
             .and_then(|s| s.to_str())
             .ok_or_else(|| format!("invalid file stem for {}", video_metadata.name))?;
 
-        let out_dir = TESTING_FILE_MANAGER
-            .lock()
-            .await
-            .test_out(format!("video-{file_stem}"));
+        let out_dir = {
+            TESTING_FILE_MANAGER
+                .lock()
+                .await
+                .test_out(format!("video-{file_stem}"))
+        };
 
         let mut stream = export_images_from_video(src, &out_dir, CAPTURE_INTERVAL);
         let mut seconds = 0i64;
@@ -369,11 +371,6 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_images() {
-        // let _ = tracing_subscriber::fmt()
-        //     .with_env_filter("image_flow=trace")
-        //     .with_test_writer()
-        //     .try_init();
-
         let errors: Vec<String> = futures::future::join_all(
             SAMPLE_VIDEO_SOURCES
                 .iter()
@@ -393,10 +390,12 @@ mod tests {
             .iter()
             .enumerate()
         {
-            let out_dir = TESTING_FILE_MANAGER
-                .lock()
-                .await
-                .test_out(Path::new("video_pipeline").join(format!("{index}")));
+            let out_dir = {
+                TESTING_FILE_MANAGER
+                    .lock()
+                    .await
+                    .test_out(Path::new("video_pipeline").join(format!("{index}")))
+            };
 
             let raw_b = gps_video_combo
                 .csv_embed
