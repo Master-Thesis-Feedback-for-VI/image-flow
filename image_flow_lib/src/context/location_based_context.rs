@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use tokio::task::JoinSet;
+
 use crate::{
     context::ContextCategory,
     location::coordinate_system::Coordinate,
@@ -119,15 +121,25 @@ impl ContextCategory {
         T: Into<Coordinate>,
     {
         let coordinates: Coordinate = coordinates.into();
+
+        let mut set = JoinSet::new();
+        set.spawn(async move {
+            Self::extract_categories_from_nominatim(coordinates)
+                .await
+                .unwrap_or_else(|_| HashSet::new())
+        });
+        set.spawn(async move { Self::extract_categories_from_overpass(coordinates).await });
+
         let mut categories = HashSet::new();
-
-        let nominatim_categories = Self::extract_categories_from_nominatim(coordinates)
+        while let Some(api_categorie) = set
+            .join_next()
             .await
-            .unwrap_or_else(|_| HashSet::new());
-        let overpass_categories = Self::extract_categories_from_overpass(coordinates).await;
+        {
+            if let Ok(api_categorie) = api_categorie {
+                categories.extend(api_categorie);
+            }
+        }
 
-        categories.extend(nominatim_categories);
-        categories.extend(overpass_categories);
         if categories.contains(&Self::Building) {
             categories = Self::remove_outside_categories(categories);
         }

@@ -114,7 +114,7 @@ pub fn evaluate_image_into_categories_impl(
     categories
 }
 
-#[derive(Debug, uniffi::Object)]
+#[derive(Debug, uniffi::Object, Clone)]
 pub struct FramePath {
     pub time_offset_from_first_frame: Duration,
     path: PathBuf,
