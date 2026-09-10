@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::fmt::Display;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -9,7 +8,7 @@ use tokio::sync::{Mutex, MutexGuard, OnceCell};
 use tokio::task::JoinHandle;
 use ultralytics_inference::{Results as DetectionResults, YOLOModel};
 
-use crate::context::ContextCategory;
+use crate::context::{ContextCategory, UniqueGeographicCategories};
 use crate::image_processor::{DominantColors, dominant_colors};
 
 const DOMINANT_COLOR_AMOUNT: usize = 7;
@@ -31,7 +30,7 @@ static MODEL: OnceCell<Mutex<YOLOModel>> = OnceCell::const_new();
 /// TODO
 pub async fn evaluate_image_into_categories(
     frame_path: impl AsRef<Path>,
-) -> crate::Result<HashSet<ContextCategory>> {
+) -> crate::Result<UniqueGeographicCategories> {
     let frame_path = frame_path
         .as_ref()
         .to_path_buf();
@@ -84,8 +83,8 @@ pub async fn detect_objects_in_image(
 pub fn evaluate_image_into_categories_impl(
     dominant_colors: &DominantColors,
     detections: &ImageDetections,
-) -> HashSet<ContextCategory> {
-    let mut categories = HashSet::new();
+) -> UniqueGeographicCategories {
+    let mut categories = UniqueGeographicCategories::new();
 
     let is_outside = detections.is_outside(OUTSIDE_THRESHOLD);
     if is_outside {
@@ -107,7 +106,7 @@ pub fn evaluate_image_into_categories_impl(
         categories.insert(ContextCategory::Forest);
     }
 
-    if !categories.contains(&ContextCategory::Outside) {
+    if !categories.contains(ContextCategory::Outside) {
         categories.insert(ContextCategory::Building);
     }
 
@@ -332,7 +331,7 @@ mod tests {
             let dominate_colors = dominant_colors(&img, 7);
 
             for category in categories {
-                if !evaluation.contains(category) {
+                if !evaluation.contains(*category) {
                     println!(
                         "This image: {}\nIt contained these colors:",
                         img_path.display()

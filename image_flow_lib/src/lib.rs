@@ -29,7 +29,7 @@ uniffi::setup_scaffolding!();
 
 use crate::{
     context::{
-        ContextCategory,
+        ContextCategory, UniqueGeographicCategories,
         image_based_context::{FramePath, evaluate_image_into_categories},
         location_based_context::evaluate_location_into_categories,
     },
@@ -68,7 +68,7 @@ async fn evaluate_context_impl(
             .unwrap_or_default()
     });
 
-    let mut collection_categories = HashSet::new();
+    let mut collection_categories = UniqueGeographicCategories::new();
     while let Some(category_from_set) = set
         .join_next()
         .await
@@ -78,7 +78,7 @@ async fn evaluate_context_impl(
         }
     }
 
-    let mut categories: HashSet<ContextCategory> = collection_categories
+    let categories: UniqueGeographicCategories = collection_categories
         .into_iter()
         .flat_map(|val| {
             val.implied_additional_categories()
@@ -87,9 +87,5 @@ async fn evaluate_context_impl(
         })
         .collect();
 
-    if categories.contains(&ContextCategory::Building) {
-        categories = ContextCategory::remove_outside_categories(categories);
-    }
-
-    categories
+    categories.categories()
 }

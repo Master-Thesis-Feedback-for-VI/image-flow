@@ -1,9 +1,7 @@
-use std::collections::HashSet;
-
 use tokio::task::JoinSet;
 
 use crate::{
-    context::ContextCategory,
+    context::{ContextCategory, UniqueGeographicCategories},
     location::coordinate_system::Coordinate,
     requesters::{
         nominatim::NominatimLocationData,
@@ -23,14 +21,12 @@ pub async fn evaluate_location_into_categories<T: Into<Coordinate>>(
     ContextCategory::from_cords(pos).await
 }
 
-pub type UniqueGeographicCategories = HashSet<ContextCategory>;
-
 impl ContextCategory {
     async fn extract_categories_from_nominatim<T: Into<Coordinate>>(
         coordinates: T,
     ) -> crate::Result<UniqueGeographicCategories> {
         let loc_data = NominatimLocationData::from_cords(coordinates).await?;
-        let mut categories = HashSet::new();
+        let mut categories = UniqueGeographicCategories::new();
 
         let location_type = loc_data
             .location_type
@@ -94,7 +90,7 @@ impl ContextCategory {
     where
         T: Into<Coordinate> + Copy,
     {
-        let mut categories = HashSet::new();
+        let mut categories = UniqueGeographicCategories::new();
 
         let intersections = find_nearby_intersections(coordinates, 50.).await;
         if let Ok(intersections) = intersections
@@ -126,11 +122,11 @@ impl ContextCategory {
         set.spawn(async move {
             Self::extract_categories_from_nominatim(coordinates)
                 .await
-                .unwrap_or_else(|_| HashSet::new())
+                .unwrap_or_else(|_| UniqueGeographicCategories::new())
         });
         set.spawn(async move { Self::extract_categories_from_overpass(coordinates).await });
 
-        let mut categories = HashSet::new();
+        let mut categories = UniqueGeographicCategories::new();
         while let Some(api_categorie) = set
             .join_next()
             .await
@@ -140,19 +136,16 @@ impl ContextCategory {
             }
         }
 
-        if categories.contains(&Self::Building) {
-            categories = Self::remove_outside_categories(categories);
-        }
         categories
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use std::iter;
 
     use crate::{
-        context::ContextCategory,
+        context::{ContextCategory, UniqueGeographicCategories},
         location::coordinate_system::Coordinate,
         requesters::nominatim::NominatimLocationData,
         tests::location_data::{self, INTERSECTION_LOCATIONS},
@@ -206,7 +199,8 @@ mod tests {
         "#);
         insta::assert_snapshot!(&nom_data.as_coordinate().as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3715399&mlon=9.7125486#map=17/52.3715399/9.7125486");
 
-        let should_categories = HashSet::from([ContextCategory::Building]);
+        let should_categories: UniqueGeographicCategories =
+            iter::once(ContextCategory::Building).collect();
         let categories = ContextCategory::from_cords(element.1).await;
 
         assert_eq!(should_categories, categories);
@@ -244,11 +238,13 @@ mod tests {
         "#);
         insta::assert_snapshot!(&nom_data.as_coordinate().as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3860214&mlon=9.8088121#map=17/52.3860214/9.8088121");
 
-        let should_category = HashSet::from([
+        let should_category: UniqueGeographicCategories = [
             ContextCategory::Outside,
             ContextCategory::Street,
             ContextCategory::Intersection,
-        ]);
+        ]
+        .into_iter()
+        .collect();
         let categories = ContextCategory::from_cords(element.1).await;
         assert_eq!(should_category, categories);
     }
@@ -261,7 +257,7 @@ mod tests {
 
             let url = location.as_url_osm();
             assert!(
-                categories.contains(&ContextCategory::Intersection),
+                categories.contains(ContextCategory::Intersection),
                 "Location: {name} does not have a intersection although it should. Check out this url to inspect the location: {url}"
             );
         }
@@ -280,7 +276,7 @@ mod tests {
             .1
             .as_url_osm();
         assert!(
-            !categories.contains(&ContextCategory::Intersection),
+            !categories.contains(ContextCategory::Intersection),
             "Location: {name} does not have a intersection although it should. Check out this url to inspect the location: {url}"
         );
     }

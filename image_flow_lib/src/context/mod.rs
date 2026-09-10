@@ -1,4 +1,7 @@
-use std::collections::HashSet;
+use std::{
+    collections::{HashSet, hash_set},
+    sync::LazyLock,
+};
 
 pub mod image_based_context;
 pub mod location_based_context;
@@ -34,12 +37,128 @@ impl ContextCategory {
             Self::Elevator => &[Self::Elevator],
         }
     }
+}
 
-    pub fn remove_outside_categories(categories: impl IntoIterator<Item = Self>) -> HashSet<Self> {
-        let inside_comp_cat = HashSet::from([Self::Building, Self::Elevator]);
-        categories
+static INSIDE_CATEGORIES: LazyLock<HashSet<ContextCategory>> =
+    LazyLock::new(|| HashSet::from([ContextCategory::Building, ContextCategory::Elevator]));
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct UniqueGeographicCategories {
+    categories: HashSet<ContextCategory>,
+    is_inside: bool,
+}
+
+impl UniqueGeographicCategories {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            categories: HashSet::new(),
+            is_inside: false,
+        }
+    }
+
+    #[must_use]
+    pub fn iter(&self) -> hash_set::Iter<'_, ContextCategory> {
+        self.categories
+            .iter()
+    }
+
+    pub fn insert(&mut self, context_category: ContextCategory) {
+        let is_inside_category = INSIDE_CATEGORIES.contains(&context_category);
+
+        if self.is_inside && !is_inside_category {
+            return;
+        }
+
+        self.categories
+            .insert(context_category);
+
+        if is_inside_category && !self.is_inside {
+            self.is_inside = true;
+            self.remove_outside_categories();
+        }
+    }
+
+    pub fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = ContextCategory>,
+    {
+        let items: Vec<ContextCategory> = iter
             .into_iter()
-            .filter(move |pred| inside_comp_cat.contains(pred))
-            .collect()
+            .collect();
+
+        let just_became_inside = !self.is_inside && items.contains(&ContextCategory::Building);
+
+        if self.is_inside || just_became_inside {
+            self.categories
+                .extend(
+                    items
+                        .into_iter()
+                        .filter(|c| INSIDE_CATEGORIES.contains(c)),
+                );
+        } else {
+            self.categories
+                .extend(items);
+        }
+
+        if just_became_inside {
+            self.is_inside = true;
+            self.remove_outside_categories();
+        }
+    }
+
+    fn remove_outside_categories(&mut self) {
+        let cat = self
+            .categories
+            .iter()
+            .filter(move |pred| INSIDE_CATEGORIES.contains(pred))
+            .copied()
+            .collect();
+
+        self.categories = cat;
+    }
+
+    fn contains(&self, context_category: ContextCategory) -> bool {
+        self.categories
+            .contains(&context_category)
+    }
+
+    #[must_use]
+    pub fn categories(self) -> HashSet<ContextCategory> {
+        self.categories
+    }
+}
+
+impl FromIterator<ContextCategory> for UniqueGeographicCategories {
+    fn from_iter<I: IntoIterator<Item = ContextCategory>>(iter: I) -> Self {
+        let collection: HashSet<ContextCategory> = iter
+            .into_iter()
+            .collect();
+
+        let is_inside = collection.contains(&ContextCategory::Building);
+        Self {
+            categories: collection,
+            is_inside,
+        }
+    }
+}
+
+impl IntoIterator for UniqueGeographicCategories {
+    type Item = ContextCategory;
+    type IntoIter = hash_set::IntoIter<ContextCategory>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.categories
+            .into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a UniqueGeographicCategories {
+    type Item = &'a ContextCategory;
+    type IntoIter = hash_set::Iter<'a, ContextCategory>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.categories
+            .iter()
     }
 }
