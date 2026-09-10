@@ -15,6 +15,8 @@ pub mod requesters;
 #[cfg(feature = "video")]
 pub mod video_slicer;
 
+use tokio::task::JoinSet;
+
 pub use crate::error::{Error, Result};
 
 pub(crate) mod image_processor;
@@ -27,7 +29,7 @@ uniffi::setup_scaffolding!();
 
 use crate::{
     context::{
-        ContextCategory,
+        ContextCategory, UniqueGeographicCategories,
         image_based_context::{FramePath, evaluate_image_into_categories},
         location_based_context::evaluate_location_into_categories,
     },
@@ -55,14 +57,28 @@ async fn evaluate_context_impl(
     location: impl Into<Coordinate>,
     frame: &FramePath,
 ) -> HashSet<ContextCategory> {
-    let mut categories = evaluate_location_into_categories(location).await;
-    let image_categories = evaluate_image_into_categories(frame)
+    let mut set = JoinSet::new();
+
+    let location = location.into();
+    let frame = frame.clone();
+    set.spawn(async move { evaluate_location_into_categories(location).await });
+    set.spawn(async move {
+        evaluate_image_into_categories(frame)
+            .await
+            .unwrap_or_default()
+    });
+
+    let mut collection_categories = UniqueGeographicCategories::new();
+    while let Some(category_from_set) = set
+        .join_next()
         .await
-        .unwrap_or_default();
+    {
+        if let Ok(category_from_set) = category_from_set {
+            collection_categories.extend(category_from_set);
+        }
+    }
 
-    categories.extend(image_categories);
-
-    let mut categories: HashSet<ContextCategory> = categories
+    let categories: UniqueGeographicCategories = collection_categories
         .into_iter()
         .flat_map(|val| {
             val.implied_additional_categories()
@@ -71,9 +87,5 @@ async fn evaluate_context_impl(
         })
         .collect();
 
-    if categories.contains(&ContextCategory::Building) {
-        categories = ContextCategory::remove_outside_categories(categories);
-    }
-
-    categories
+    categories.categories()
 }
