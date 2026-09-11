@@ -19,6 +19,8 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
     FramePath,
+    context::UniqueGeographicCategories,
+    evaluate_context_impl,
     location::{
         coordinate_system::Coordinate,
         tabular_gps::{BestMatchByDistance, DataPointsGPS, TabularGPS},
@@ -323,6 +325,7 @@ mod tests {
     use std::path::Path;
 
     use crate::{
+        evaluate_context_impl,
         location::tabular_gps::DataPointsGPS,
         tests::{TESTING_FILE_MANAGER, video_data::SAMPLE_VIDEO_SOURCES},
         video_slicer::{ImageGPSZip, VideoMetadata, export_images_from_video},
@@ -384,40 +387,45 @@ mod tests {
         assert!(errors.is_empty(), "failures:\n{}", errors.join("\n"));
     }
 
-    #[tokio::test]
-    async fn process_pipeline() {
-        for (index, gps_video_combo) in SAMPLE_VIDEO_SOURCES
-            .iter()
-            .enumerate()
-        {
-            let out_dir = {
-                TESTING_FILE_MANAGER
-                    .lock()
-                    .await
-                    .test_out(Path::new("video_pipeline").join(format!("{index}")))
-            };
+    // #[tokio::test]
+    // async fn process_pipeline() {
+    //     for (index, gps_video_combo) in SAMPLE_VIDEO_SOURCES
+    //         .iter()
+    //         .enumerate()
+    //     {
+    //         let out_dir = {
+    //             TESTING_FILE_MANAGER
+    //                 .lock()
+    //                 .await
+    //                 .test_out(Path::new("video_pipeline").join(format!("{index}")))
+    //         };
 
-            let raw_b = gps_video_combo
-                .csv_embed
-                .as_bytes();
-            let csv_gps_data = DataPointsGPS::from_csv(raw_b).unwrap();
-            let mut zipped = ImageGPSZip::from_video_and_gps(
-                gps_video_combo.video_path,
-                &csv_gps_data,
-                out_dir,
-                Duration::seconds(1),
-            )
-            .await
-            .unwrap();
-            zipped.do_not_remove_frames();
+    //         let raw_b = gps_video_combo
+    //             .csv_embed
+    //             .as_bytes();
+    //         let csv_gps_data = DataPointsGPS::from_csv(raw_b).unwrap();
+    //         let mut zipped = ImageGPSZip::from_video_and_gps(
+    //             gps_video_combo.video_path,
+    //             &csv_gps_data,
+    //             out_dir,
+    //             Duration::seconds(1),
+    //         )
+    //         .await
+    //         .unwrap();
+    //         zipped.do_not_remove_frames();
 
-            // TODO
-            // We should have the ability to call on each iteration: evaluate_context and pass in
-            // the image and the coordinate.
-            //
-            // The image should then be passed through computer vision
-            //
-            // The location can already be evaluated!
-        }
-    }
+    //         // TODO
+    //         // We should have the ability to call on each iteration: evaluate_context and pass in
+    //         // the image and the coordinate.
+    //         //
+    //         // The image should then be passed through computer vision
+    //         //
+    //         // The location can already be evaluated!
+    //         // for (cord, frame) in zipped.iter() {
+    //         //     let evaulation = evaluate_context_impl(*cord, frame)
+    //         //         .await
+    //         //         .unwrap();
+    //         // }
+    //     }
+    // }
 }

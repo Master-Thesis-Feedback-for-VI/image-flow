@@ -22,6 +22,11 @@ name = "asses_image"
 path = "../scripts/asses_image.rs"
 required-features = ["video", "cli"]
 
+[[bin]]
+name = "pipeline"
+path = "../scripts/pipeline.rs"
+required-features = ["video", "cli"]
+
 [features]
 default = ["video"]
 video = ["dep:ffmpeg-next"]
