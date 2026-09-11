@@ -6,12 +6,13 @@ use std::time::Duration as DefaultDuration;
 use chrono::Duration;
 use tokio::sync::{Mutex, MutexGuard, OnceCell};
 use tokio::task::JoinHandle;
+use tracing::instrument;
 use ultralytics_inference::{Results as DetectionResults, YOLOModel};
 
 use crate::context::{ContextCategory, UniqueGeographicCategories};
 use crate::image_processor::{DominantColors, dominant_colors};
 
-const DOMINANT_COLOR_AMOUNT: usize = 7;
+const DOMINANT_COLOR_AMOUNT: usize = 4;
 const TRAFFIC_LIGHT_THRESHOLD: usize = 8;
 const OUTSIDE_THRESHOLD: &[(DetectionType, usize)] = &[
     (DetectionType::Person, 7),
@@ -35,10 +36,14 @@ pub async fn evaluate_image_into_categories(
         .as_ref()
         .to_path_buf();
     tokio::spawn(async move {
+        tracing::info!("Detecting objects in image...");
         let image_detections = detect_objects_in_image(&frame_path).await?;
+        tracing::info!("Finished detecting objects in image...");
 
+        tracing::info!("Detecting colors in image...");
         let img = image::open(&frame_path)?;
         let dominant_colors = dominant_colors(&img, DOMINANT_COLOR_AMOUNT);
+        tracing::info!("Finished detecting colors in image...");
         Ok(evaluate_image_into_categories_impl(
             &dominant_colors,
             &image_detections,
@@ -79,6 +84,7 @@ pub async fn detect_objects_in_image(
 }
 
 /// TODO
+#[instrument]
 #[must_use]
 pub fn evaluate_image_into_categories_impl(
     dominant_colors: &DominantColors,
@@ -221,6 +227,7 @@ pub struct ImageDetections {
 }
 
 impl ImageDetections {
+    #[instrument]
     fn from_detection_result(res: DetectionResults) -> Self {
         let mut detections = Vec::new();
 

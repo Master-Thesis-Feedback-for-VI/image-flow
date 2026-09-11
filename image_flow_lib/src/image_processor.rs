@@ -2,12 +2,15 @@ use std::fmt::Display;
 use std::ops::Deref;
 
 use image::DynamicImage;
+use image::imageops::FilterType;
 use kmeans_colors::{Kmeans, Sort, get_kmeans};
 use palette::cast::from_component_slice;
 use palette::{Hsv, IntoColor, Lab, Srgb};
+use tracing::instrument;
 
 const FOREST_GREEN: Srgb<u8> = Srgb::new(32, 150, 32);
 
+#[derive(Debug)]
 pub struct DominantColors {
     colors: Vec<DominantColor>,
 }
@@ -91,7 +94,7 @@ impl DominantColor {
     }
 
     pub fn is_close_to_forest_green(self) -> bool {
-        self.is_close_to_color(FOREST_GREEN, 60.0, 0.80, 0.80)
+        self.is_close_to_color(FOREST_GREEN, 50.0, 0.50, 0.60)
     }
 }
 
@@ -111,8 +114,10 @@ impl Display for DominantColor {
     }
 }
 
+#[instrument]
 pub fn dominant_colors(image: &DynamicImage, amount: usize) -> DominantColors {
-    let rgb_image = image.to_rgb8();
+    let small = image.resize(200, 200, FilterType::Triangle);
+    let rgb_image = small.to_rgb8();
     let pixels = rgb_image.into_raw();
 
     let lab_pixels: Vec<Lab> = from_component_slice::<Srgb<u8>>(&pixels)

@@ -1478,6 +1478,7 @@ name = "image_flow_lib"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "clap",
  "csv",
  "ffmpeg-next",
  "futures",

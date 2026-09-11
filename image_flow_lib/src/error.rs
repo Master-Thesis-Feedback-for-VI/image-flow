@@ -41,6 +41,7 @@ impl From<Error> for ImageFlowError {
 
             #[cfg(feature = "video")]
             Kind::Ffmpeg => Self::Ffmpeg { message },
+            Kind::FileNotExists => Self::Io { message },
         }
     }
 }
@@ -64,6 +65,7 @@ impl Display for Error {
 
             #[cfg(feature = "video")]
             Kind::Ffmpeg => "FFmpeg error",
+            Kind::FileNotExists => "File does not exist",
         };
 
         match &self
@@ -99,6 +101,7 @@ pub(crate) enum Kind {
     Serialization,
     Io,
     Image,
+    FileNotExists,
 
     #[cfg(feature = "video")]
     Ffmpeg,
@@ -146,6 +149,13 @@ where
     E: Into<BoxError>,
 {
     Error::new(Kind::Io, Some(e))
+}
+
+pub(crate) fn file_does_not_exist<E>(e: E) -> Error
+where
+    E: Into<BoxError>,
+{
+    Error::new(Kind::FileNotExists, Some(e))
 }
 
 pub(crate) fn image<E>(e: E) -> Error

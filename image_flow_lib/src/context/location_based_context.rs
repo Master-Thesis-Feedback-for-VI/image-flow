@@ -35,7 +35,6 @@ impl ContextCategory {
             "elevator" => {
                 categories.insert(Self::Elevator);
             }
-            "secondary" => {}
             "apartments" => {
                 categories.insert(Self::Building);
             }
@@ -50,6 +49,7 @@ impl ContextCategory {
             "bicycle_parking" => {
                 categories.insert(Self::Outside);
             }
+            "secondary" | "unclassified" => {}
             _ => {
                 unreachable!(
                     "New Type: {location_type}, check it out here: {}",

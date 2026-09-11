@@ -18,22 +18,26 @@ name = "fetch_json_locations"
 path = "../scripts/fetch_json_locations.rs"
 
 [[bin]]
-name = "extract_images"
-path = "../scripts/extract_images.rs"
-required-features = ["video"]
+name = "asses_image"
+path = "../scripts/asses_image.rs"
+required-features = ["video", "cli"]
 
 [features]
 default = ["video"]
 video = ["dep:ffmpeg-next"]
+cli = ["dep:clap"]
 
 [dependencies]
 # ffmpeg-next = { version = "9", features = ["build"], optional = true }
 # opencv = { version = "0.100", features = ["clang-runtime"] }
 # toml = { version = "1.1", features = ["serde"] }
 # uuid = { version = "1.24", features = ["v7", "serde"] }
-kmeans_colors = { version = "0.7", default-features = false, features = ["palette_color"]}
+kmeans_colors = { version = "0.7", default-features = false, features = [
+  "palette_color",
+] }
 palette = "0.7"
 thiserror = "2"
+clap = { version = "4.6", features = ["derive"], optional = true }
 chrono = { version = "0.4", features = ["serde"] }
 csv = "1"
 ffmpeg-next = { version = "9", optional = true }
@@ -44,6 +48,7 @@ serde_json = "1.0"
 tempfile = "3.27"
 tokio = { version = "1.53", features = ["full"] }
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ultralytics-inference = { version = "0.0", default-features = false, features = [
   "annotate",
 ] }
@@ -53,7 +58,6 @@ futures = "0.3"
 
 [dev-dependencies]
 insta = "1.48"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }

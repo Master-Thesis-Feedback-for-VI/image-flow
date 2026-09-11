@@ -33,10 +33,11 @@ use crate::{
         image_based_context::{FramePath, evaluate_image_into_categories},
         location_based_context::evaluate_location_into_categories,
     },
+    error::ImageFlowError,
     location::coordinate_system::Coordinate,
 };
-use std::collections::HashSet;
-use std::sync::Arc;
+use std::path::Path;
+use std::result::Result as DefaultResult;
 
 /// TODO
 ///
@@ -44,28 +45,61 @@ use std::sync::Arc;
 /// TODO
 #[allow(clippy::needless_pass_by_value)]
 #[uniffi::export]
-pub async fn evaluate_context(location: Coordinate, frame: Arc<FramePath>) -> Vec<ContextCategory> {
-    evaluate_context_impl(location, frame.as_ref())
-        .await
+pub async fn evaluate_context(
+    location: Coordinate,
+    frame: String,
+) -> DefaultResult<Vec<ContextCategory>, ImageFlowError> {
+    let categories = evaluate_context_impl(location, frame)
+        .await?
         .into_iter()
-        .collect()
+        .collect();
+
+    Ok(categories)
 }
 
 // === Implementations ===
 
-async fn evaluate_context_impl(
+/// TODO
+///
+/// # Errors
+/// TODO
+pub async fn evaluate_context_impl(
     location: impl Into<Coordinate>,
-    frame: &FramePath,
-) -> HashSet<ContextCategory> {
+    frame: impl AsRef<Path>,
+) -> crate::Result<UniqueGeographicCategories> {
+    if !frame
+        .as_ref()
+        .exists()
+    {
+        let err_msg = format!(
+            "the file {} does not exist",
+            frame
+                .as_ref()
+                .display()
+        );
+        return Err(crate::error::file_does_not_exist(err_msg));
+    }
+
     let mut set = JoinSet::new();
 
     let location = location.into();
-    let frame = frame.clone();
-    set.spawn(async move { evaluate_location_into_categories(location).await });
+    let frame = frame
+        .as_ref()
+        .to_path_buf();
     set.spawn(async move {
-        evaluate_image_into_categories(frame)
+        tracing::info!("Running location evaluation!");
+        let loc = evaluate_location_into_categories(location).await;
+        tracing::info!("Finished location evaluation");
+        loc
+    });
+
+    set.spawn(async move {
+        tracing::info!("Running image evaluation!");
+        let img = evaluate_image_into_categories(frame)
             .await
-            .unwrap_or_default()
+            .unwrap_or_default();
+        tracing::info!("Finished image evaluation");
+        img
     });
 
     let mut collection_categories = UniqueGeographicCategories::new();
@@ -87,5 +121,5 @@ async fn evaluate_context_impl(
         })
         .collect();
 
-    categories.categories()
+    Ok(categories)
 }
