@@ -1,5 +1,5 @@
 use std::fmt::Display;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::time::Duration as DefaultDuration;
 
@@ -91,6 +91,7 @@ pub fn evaluate_image_into_categories_impl(
     detections: &ImageDetections,
 ) -> UniqueGeographicCategories {
     let mut categories = UniqueGeographicCategories::new();
+    categories.detections = Some(detections.clone());
 
     let is_outside = detections.is_outside(OUTSIDE_THRESHOLD);
     if is_outside {
@@ -221,12 +222,19 @@ pub struct Detection {
     name: DetectionType,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ImageDetections {
     detections: Vec<Detection>,
 }
 
 impl ImageDetections {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            detections: Vec::new(),
+        }
+    }
+
     #[instrument]
     fn from_detection_result(res: DetectionResults) -> Self {
         let mut detections = Vec::new();
@@ -304,6 +312,12 @@ impl Deref for ImageDetections {
 
     fn deref(&self) -> &Self::Target {
         &self.detections
+    }
+}
+
+impl DerefMut for ImageDetections {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.detections
     }
 }
 

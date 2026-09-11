@@ -3,8 +3,13 @@ use std::{
     sync::LazyLock,
 };
 
+use crate::context::image_based_context::ImageDetections;
+
 pub mod image_based_context;
 pub mod location_based_context;
+
+static INSIDE_CATEGORIES: LazyLock<HashSet<ContextCategory>> =
+    LazyLock::new(|| HashSet::from([ContextCategory::Building, ContextCategory::Elevator]));
 
 /// All potential geographic categories supported.
 ///
@@ -39,11 +44,9 @@ impl ContextCategory {
     }
 }
 
-static INSIDE_CATEGORIES: LazyLock<HashSet<ContextCategory>> =
-    LazyLock::new(|| HashSet::from([ContextCategory::Building, ContextCategory::Elevator]));
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub struct UniqueGeographicCategories {
+    pub detections: Option<ImageDetections>,
     categories: HashSet<ContextCategory>,
     is_inside: bool,
 }
@@ -53,6 +56,7 @@ impl UniqueGeographicCategories {
     pub fn new() -> Self {
         Self {
             categories: HashSet::new(),
+            detections: None,
             is_inside: false,
         }
     }
@@ -139,6 +143,7 @@ impl FromIterator<ContextCategory> for UniqueGeographicCategories {
         Self {
             categories: collection,
             is_inside,
+            detections: None,
         }
     }
 }

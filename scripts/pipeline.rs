@@ -3,7 +3,6 @@ use clap::Parser;
 use image_flow::{location::tabular_gps::DataPointsGPS, video_slicer::ImageGPSZip};
 use std::{fs::File, path::PathBuf};
 use tempfile::tempdir;
-use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
@@ -35,7 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let file = File::open(args.csv)?;
     let datapoints = DataPointsGPS::from_csv(file)?;
-    let mut zipped = ImageGPSZip::from_video_and_gps(
+    let zipped = ImageGPSZip::from_video_and_gps(
         args.vid,
         &datapoints,
         tmp_directory.path(),

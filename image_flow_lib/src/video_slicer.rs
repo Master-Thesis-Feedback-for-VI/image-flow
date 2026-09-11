@@ -19,8 +19,6 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
     FramePath,
-    context::UniqueGeographicCategories,
-    evaluate_context_impl,
     location::{
         coordinate_system::Coordinate,
         tabular_gps::{BestMatchByDistance, DataPointsGPS, TabularGPS},
@@ -325,10 +323,8 @@ mod tests {
     use std::path::Path;
 
     use crate::{
-        evaluate_context_impl,
-        location::tabular_gps::DataPointsGPS,
         tests::{TESTING_FILE_MANAGER, video_data::SAMPLE_VIDEO_SOURCES},
-        video_slicer::{ImageGPSZip, VideoMetadata, export_images_from_video},
+        video_slicer::{VideoMetadata, export_images_from_video},
     };
 
     const ACCEPTED_DUR: Duration = Duration::seconds(1);

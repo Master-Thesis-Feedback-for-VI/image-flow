@@ -46,10 +46,13 @@ impl ContextCategory {
                 categories.insert(Self::Outside);
                 categories.insert(Self::Pedestrian);
             }
-            "bicycle_parking" => {
+            "bicycle_parking" | "house" => {
                 categories.insert(Self::Outside);
             }
-            "secondary" | "unclassified" => {}
+            "motorway" | "trunk" | "primary" | "secondary" | "tertiary" | "unclassified"
+            | "residential" | "living_street" => {
+                categories.insert(Self::Street);
+            }
             _ => {
                 unreachable!(
                     "New Type: {location_type}, check it out here: {}",
@@ -203,7 +206,7 @@ mod tests {
             iter::once(ContextCategory::Building).collect();
         let categories = ContextCategory::from_cords(element.1).await;
 
-        assert_eq!(should_categories, categories);
+        assert_eq!(should_categories.categories(), categories.categories());
     }
 
     #[tokio::test]
@@ -246,7 +249,7 @@ mod tests {
         .into_iter()
         .collect();
         let categories = ContextCategory::from_cords(element.1).await;
-        assert_eq!(should_category, categories);
+        assert_eq!(should_category.categories(), categories.categories());
     }
 
     #[tokio::test]

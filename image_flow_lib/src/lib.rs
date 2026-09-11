@@ -30,7 +30,7 @@ uniffi::setup_scaffolding!();
 use crate::{
     context::{
         ContextCategory, UniqueGeographicCategories,
-        image_based_context::{FramePath, evaluate_image_into_categories},
+        image_based_context::{FramePath, ImageDetections, evaluate_image_into_categories},
         location_based_context::evaluate_location_into_categories,
     },
     error::ImageFlowError,
@@ -107,12 +107,26 @@ pub async fn evaluate_context_impl(
         .join_next()
         .await
     {
-        if let Ok(category_from_set) = category_from_set {
+        if let Ok(mut category_from_set) = category_from_set {
+            let detections = category_from_set
+                .detections
+                .take();
             collection_categories.extend(category_from_set);
+
+            if let Some(detections) = detections {
+                let raw_detections = (*detections).clone();
+                collection_categories
+                    .detections
+                    .get_or_insert(ImageDetections::new())
+                    .extend(raw_detections);
+            }
         }
     }
 
-    let categories: UniqueGeographicCategories = collection_categories
+    let saved_detections = collection_categories
+        .detections
+        .take();
+    let mut categories: UniqueGeographicCategories = collection_categories
         .into_iter()
         .flat_map(|val| {
             val.implied_additional_categories()
@@ -120,6 +134,7 @@ pub async fn evaluate_context_impl(
                 .copied()
         })
         .collect();
+    categories.detections = saved_detections;
 
     Ok(categories)
 }
