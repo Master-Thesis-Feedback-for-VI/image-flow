@@ -15,7 +15,7 @@ install-toolchains:
 [group('build')]
 build target:
     # IPHONEOS_DEPLOYMENT_TARGET=15.0 cargo build --target {{target}} --release --lib
-    cargo build --target {{target}} --release --lib
+    cargo build --target {{target}} --release --lib --no-default-features
 
 [group('build')]
 build-android target:
