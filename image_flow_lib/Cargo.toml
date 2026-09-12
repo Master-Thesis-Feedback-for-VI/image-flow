@@ -9,6 +9,13 @@ description.workspace = true
 categories.workspace = true
 keywords.workspace = true
 
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
 [lib]
 name = "image_flow"
 crate-type = ["cdylib", "rlib", "staticlib"]
