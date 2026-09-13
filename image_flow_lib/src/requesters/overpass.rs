@@ -166,7 +166,7 @@ pub async fn inside_building(coordinates: impl Into<Coordinate>) -> crate::Resul
     let ctx = if empty_building {
         ContextCategory::Outside
     } else {
-        ContextCategory::Building
+        ContextCategory::Inside
     };
     Ok(ctx)
 }

@@ -5,7 +5,7 @@ use std::time::Duration as DefaultDuration;
 
 use chrono::Duration;
 use tokio::sync::{Mutex, MutexGuard, OnceCell};
-use tokio::task::JoinHandle;
+use tokio::task::{JoinHandle, JoinSet};
 use tracing::instrument;
 use ultralytics_inference::{Results as DetectionResults, YOLOModel};
 
@@ -32,25 +32,29 @@ static MODEL: OnceCell<Mutex<YOLOModel>> = OnceCell::const_new();
 pub async fn evaluate_image_into_categories(
     frame_path: impl AsRef<Path>,
 ) -> crate::Result<UniqueGeographicCategories> {
-    let frame_path = frame_path
+    let frame_path_image = frame_path
         .as_ref()
         .to_path_buf();
-    tokio::spawn(async move {
-        tracing::info!("Detecting objects in image...");
-        let image_detections = detect_objects_in_image(&frame_path).await?;
-        tracing::info!("Finished detecting objects in image...");
+    let frame_path_color = frame_path_image.clone();
 
+    let detections_fut = async {
+        tracing::info!("Detecting objects in image...");
+        let image_detections = detect_objects_in_image(&frame_path_image).await;
+        tracing::info!("Finished detecting objects in image...");
+        image_detections
+    };
+
+    let colors_fut = async {
         tracing::info!("Detecting colors in image...");
-        let img = image::open(&frame_path)?;
-        let dominant_colors = dominant_colors(&img, DOMINANT_COLOR_AMOUNT);
+        let dominant_colors = dominant_colors(&frame_path_color, DOMINANT_COLOR_AMOUNT).await;
         tracing::info!("Finished detecting colors in image...");
-        Ok(evaluate_image_into_categories_impl(
-            &dominant_colors,
-            &image_detections,
-        ))
-    })
-    .await
-    .map_err(crate::error::io)?
+        dominant_colors
+    };
+
+    let (image_detections, dominant_colors) = tokio::try_join!(detections_fut, colors_fut)?;
+
+    let categories = evaluate_image_into_categories_impl(&dominant_colors, &image_detections);
+    Ok(categories)
 }
 
 /// TODO
@@ -62,23 +66,22 @@ pub async fn evaluate_image_into_categories(
 pub async fn detect_objects_in_image(
     frame_path: impl AsRef<Path>,
 ) -> crate::Result<ImageDetections> {
-    let path = frame_path
+    let frame_path = frame_path
         .as_ref()
         .to_path_buf();
-    let handle: JoinHandle<crate::Result<DetectionResults>> = tokio::spawn(async move {
-        let mut results: Vec<DetectionResults> = lock_model()
-            .await?
-            .predict(&path)?;
-        assert_eq!(results.len(), 1);
+    let mut results =
+        tokio::task::spawn_blocking(move || -> crate::Result<Vec<DetectionResults>> {
+            let handle = tokio::runtime::Handle::current();
+            let mut model = handle.block_on(lock_model())?;
+            model
+                .predict(frame_path)
+                .map_err(crate::error::image)
+        })
+        .await??;
+    assert_eq!(results.len(), 1);
 
-        let result = results.remove(0);
-        Ok(result)
-    });
-
-    let res = handle
-        .await
-        .map_err(crate::error::io)??;
-    let image_detections = ImageDetections::from_detection_result(res);
+    let result = results.remove(0);
+    let image_detections = ImageDetections::from_detection_result(result);
 
     Ok(image_detections)
 }
@@ -114,7 +117,7 @@ pub fn evaluate_image_into_categories_impl(
     }
 
     if !categories.contains(ContextCategory::Outside) {
-        categories.insert(ContextCategory::Building);
+        categories.insert(ContextCategory::Inside);
     }
 
     categories
@@ -169,12 +172,9 @@ impl Drop for FramePath {
 
 async fn model() -> crate::Result<&'static Mutex<YOLOModel>> {
     MODEL
-        .get_or_try_init(|| async {
-            let model = tokio::task::spawn_blocking(|| YOLOModel::load("yolo26m.onnx"))
-                .await
-                .map_err(crate::error::io)? // JoinError -> crate::Error, unwrap outer layer
-                .map_err(crate::error::io)?; // InferenceError -> crate::Error, unwrap inner layer
-            Ok(Mutex::new(model)) // now `model` is a plain YOLOModel
+        .get_or_try_init(async || {
+            let model = tokio::task::spawn_blocking(|| YOLOModel::load("yolo26m.onnx")).await??;
+            Ok(Mutex::new(model))
         })
         .await
 }
@@ -325,7 +325,9 @@ impl DerefMut for ImageDetections {
 #[cfg(test)]
 mod tests {
     use crate::{
-        context::image_based_context::evaluate_image_into_categories,
+        context::image_based_context::{
+            DOMINANT_COLOR_AMOUNT, detect_objects_in_image, evaluate_image_into_categories_impl,
+        },
         image_processor::dominant_colors,
         tests::{TESTING_FILE_MANAGER, TestingImage},
     };
@@ -344,12 +346,14 @@ mod tests {
             categories,
         } in &image_files
         {
-            let evaluation = evaluate_image_into_categories(&img_path)
+            let dominate_colors = dominant_colors(&img_path, DOMINANT_COLOR_AMOUNT)
+                .await
+                .unwrap();
+            let detected_obj = detect_objects_in_image(img_path)
                 .await
                 .unwrap();
 
-            let img = image::open(img_path).unwrap();
-            let dominate_colors = dominant_colors(&img, 7);
+            let evaluation = evaluate_image_into_categories_impl(&dominate_colors, &detected_obj);
 
             for category in categories {
                 if !evaluation.contains(*category) {
@@ -360,6 +364,7 @@ mod tests {
                     for color in dominate_colors.iter() {
                         println!("h, s, v = {color}");
                     }
+                    println!("Additionally these objects where detected: {detected_obj:?}");
 
                     panic!();
                 }

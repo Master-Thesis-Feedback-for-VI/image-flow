@@ -9,7 +9,7 @@ pub mod image_based_context;
 pub mod location_based_context;
 
 static INSIDE_CATEGORIES: LazyLock<HashSet<ContextCategory>> =
-    LazyLock::new(|| HashSet::from([ContextCategory::Building, ContextCategory::Elevator]));
+    LazyLock::new(|| HashSet::from([ContextCategory::Inside, ContextCategory::Elevator]));
 
 /// All potential geographic categories supported.
 ///
@@ -20,7 +20,7 @@ pub enum ContextCategory {
     Forest,
 
     Outside,
-    Building,
+    Inside,
 
     Street,
     Pedestrian,
@@ -35,7 +35,7 @@ impl ContextCategory {
         match self {
             Self::Forest => &[Self::Outside, Self::Forest],
             Self::Outside => &[Self::Outside],
-            Self::Building => &[Self::Building],
+            Self::Inside => &[Self::Inside],
             Self::Street => &[Self::Outside, Self::Street],
             Self::Pedestrian => &[Self::Outside, Self::Pedestrian],
             Self::Intersection => &[Self::Outside, Self::Intersection],
@@ -91,7 +91,7 @@ impl UniqueGeographicCategories {
             .into_iter()
             .collect();
 
-        let just_became_inside = !self.is_inside && items.contains(&ContextCategory::Building);
+        let just_became_inside = !self.is_inside && items.contains(&ContextCategory::Inside);
 
         if self.is_inside || just_became_inside {
             self.categories
@@ -139,7 +139,7 @@ impl FromIterator<ContextCategory> for UniqueGeographicCategories {
             .into_iter()
             .collect();
 
-        let is_inside = collection.contains(&ContextCategory::Building);
+        let is_inside = collection.contains(&ContextCategory::Inside);
         Self {
             categories: collection,
             is_inside,

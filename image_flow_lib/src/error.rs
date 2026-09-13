@@ -4,6 +4,7 @@ use std::{
     io,
 };
 
+use tokio::task::JoinError;
 use ultralytics_inference::InferenceError;
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -214,5 +215,11 @@ impl From<io::Error> for crate::Error {
 impl From<InferenceError> for crate::Error {
     fn from(value: InferenceError) -> Self {
         image(value)
+    }
+}
+
+impl From<JoinError> for crate::Error {
+    fn from(value: JoinError) -> Self {
+        io(value)
     }
 }

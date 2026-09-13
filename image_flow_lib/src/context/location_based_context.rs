@@ -36,7 +36,7 @@ impl ContextCategory {
                 categories.insert(Self::Elevator);
             }
             "apartments" => {
-                categories.insert(Self::Building);
+                categories.insert(Self::Inside);
             }
             "track" => {
                 categories.insert(Self::Outside);
@@ -71,7 +71,7 @@ impl ContextCategory {
                 categories.insert(Self::Street);
             }
             "building" => {
-                categories.insert(Self::Building);
+                categories.insert(Self::Inside);
             }
             "amenity" => {
                 categories.insert(Self::Outside);
@@ -203,7 +203,7 @@ mod tests {
         insta::assert_snapshot!(&nom_data.as_coordinate().as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3715399&mlon=9.7125486#map=17/52.3715399/9.7125486");
 
         let should_categories: UniqueGeographicCategories =
-            iter::once(ContextCategory::Building).collect();
+            iter::once(ContextCategory::Inside).collect();
         let categories = ContextCategory::from_cords(element.1).await;
 
         assert_eq!(should_categories.categories(), categories.categories());

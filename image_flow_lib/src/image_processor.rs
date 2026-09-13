@@ -1,5 +1,6 @@
 use std::fmt::Display;
 use std::ops::Deref;
+use std::path::Path;
 
 use image::DynamicImage;
 use image::imageops::FilterType;
@@ -114,55 +115,68 @@ impl Display for DominantColor {
     }
 }
 
-#[instrument]
-pub fn dominant_colors(image: &DynamicImage, amount: usize) -> DominantColors {
-    let small = image.resize(200, 200, FilterType::Triangle);
-    let rgb_image = small.to_rgb8();
-    let pixels = rgb_image.into_raw();
+#[instrument(skip(frame_path))]
+pub async fn dominant_colors(
+    frame_path: impl AsRef<Path>,
+    amount: usize,
+) -> crate::Result<DominantColors> {
+    let frame_path = frame_path
+        .as_ref()
+        .to_path_buf();
 
-    let lab_pixels: Vec<Lab> = from_component_slice::<Srgb<u8>>(&pixels)
-        .iter()
-        .map(|rgb| {
-            rgb.into_linear()
-                .into_color()
-        })
-        .collect();
+    tokio::task::spawn_blocking(move || -> crate::Result<DominantColors> {
+        let img = image::open(frame_path)?;
+        let small = img.resize(200, 200, FilterType::Triangle);
+        let rgb_image = small.to_rgb8();
+        let pixels = rgb_image.into_raw();
 
-    let max_iter = 30;
-    let convergence = 5.;
-    let runs = 5;
+        let lab_pixels: Vec<Lab> = from_component_slice::<Srgb<u8>>(&pixels)
+            .iter()
+            .map(|rgb| {
+                rgb.into_linear()
+                    .into_color()
+            })
+            .collect();
 
-    let mut best = Kmeans::new();
+        let max_iter = 30;
+        let convergence = 5.;
+        let runs = 5;
 
-    for seed in 0..runs {
-        let result = get_kmeans(amount, max_iter, convergence, false, &lab_pixels, seed);
+        let mut best = Kmeans::new();
 
-        if result.score < best.score {
-            best = result;
-        }
-    }
+        for seed in 0..runs {
+            let result = get_kmeans(amount, max_iter, convergence, false, &lab_pixels, seed);
 
-    let mut clusters = Lab::sort_indexed_colors(&best.centroids, &best.indices);
-    clusters.sort_unstable_by(|a, b| {
-        b.percentage
-            .total_cmp(&a.percentage)
-    });
-
-    clusters
-        .into_iter()
-        .map(|cluster| {
-            let rgb: Srgb<u8> = Srgb::from_linear(
-                cluster
-                    .centroid
-                    .into_color(),
-            );
-
-            DominantColor {
-                rgb,
-                percentage: cluster.percentage,
+            if result.score < best.score {
+                best = result;
             }
-        })
-        .collect()
+        }
+
+        let mut clusters = Lab::sort_indexed_colors(&best.centroids, &best.indices);
+        clusters.sort_unstable_by(|a, b| {
+            b.percentage
+                .total_cmp(&a.percentage)
+        });
+
+        let dominant_colors = clusters
+            .into_iter()
+            .map(|cluster| {
+                let rgb: Srgb<u8> = Srgb::from_linear(
+                    cluster
+                        .centroid
+                        .into_color(),
+                );
+
+                DominantColor {
+                    rgb,
+                    percentage: cluster.percentage,
+                }
+            })
+            .collect::<DominantColors>();
+
+        Ok(dominant_colors)
+    })
+    .await?
 }
 
 fn circular_hue_difference(a: f32, b: f32) -> f32 {

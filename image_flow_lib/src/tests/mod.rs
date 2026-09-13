@@ -78,6 +78,7 @@ impl TestingFileManger {
                 let folders = [
                     (image_dir.join("outside"), ContextCategory::Outside),
                     (image_dir.join("forest"), ContextCategory::Forest),
+                    (image_dir.join("inside"), ContextCategory::Inside),
                 ];
 
                 folders
@@ -153,7 +154,7 @@ impl TestingFileManger {
     }
 }
 
-const AMOUNT_OF_IMAGES: usize = 8;
+const AMOUNT_OF_IMAGES: usize = 11;
 
 #[allow(clippy::significant_drop_tightening)]
 #[tokio::test]
