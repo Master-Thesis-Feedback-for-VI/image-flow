@@ -5,7 +5,6 @@ use std::time::Duration as DefaultDuration;
 
 use chrono::Duration;
 use tokio::sync::{Mutex, MutexGuard, OnceCell};
-use tokio::task::{JoinHandle, JoinSet};
 use tracing::instrument;
 use ultralytics_inference::{Results as DetectionResults, YOLOModel};
 
@@ -32,21 +31,18 @@ static MODEL: OnceCell<Mutex<YOLOModel>> = OnceCell::const_new();
 pub async fn evaluate_image_into_categories(
     frame_path: impl AsRef<Path>,
 ) -> crate::Result<UniqueGeographicCategories> {
-    let frame_path_image = frame_path
-        .as_ref()
-        .to_path_buf();
-    let frame_path_color = frame_path_image.clone();
+    let frame_path = frame_path.as_ref();
 
     let detections_fut = async {
         tracing::info!("Detecting objects in image...");
-        let image_detections = detect_objects_in_image(&frame_path_image).await;
+        let image_detections = detect_objects_in_image(&frame_path).await;
         tracing::info!("Finished detecting objects in image...");
         image_detections
     };
 
     let colors_fut = async {
         tracing::info!("Detecting colors in image...");
-        let dominant_colors = dominant_colors(&frame_path_color, DOMINANT_COLOR_AMOUNT).await;
+        let dominant_colors = dominant_colors(frame_path, DOMINANT_COLOR_AMOUNT).await;
         tracing::info!("Finished detecting colors in image...");
         dominant_colors
     };

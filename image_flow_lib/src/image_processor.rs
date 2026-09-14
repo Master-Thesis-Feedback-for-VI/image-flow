@@ -2,7 +2,6 @@ use std::fmt::Display;
 use std::ops::Deref;
 use std::path::Path;
 
-use image::DynamicImage;
 use image::imageops::FilterType;
 use kmeans_colors::{Kmeans, Sort, get_kmeans};
 use palette::cast::from_component_slice;
