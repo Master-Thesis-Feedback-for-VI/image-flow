@@ -35,7 +35,7 @@ impl ContextCategory {
             "elevator" => {
                 categories.insert(Self::Elevator);
             }
-            "apartments" => {
+            "apartments" | "library" => {
                 categories.insert(Self::Inside);
             }
             "track" => {
@@ -55,7 +55,7 @@ impl ContextCategory {
             }
             _ => {
                 unreachable!(
-                    "New Type: {location_type}, check it out here: {}",
+                    "New location type: [[{location_type}]],\ncheck it out here: {}",
                     loc_data
                         .as_coordinate()
                         .as_url_osm()

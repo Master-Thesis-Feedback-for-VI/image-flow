@@ -131,6 +131,43 @@ impl UniqueGeographicCategories {
     pub fn categories(self) -> HashSet<ContextCategory> {
         self.categories
     }
+
+    pub(crate) fn merge(uniq1: Self, uniq2: Self) -> Self {
+        let is_inside = uniq1.is_inside || uniq2.is_inside;
+
+        let mut categories = uniq1.categories;
+        categories.extend(uniq2.categories);
+
+        let mut detections = uniq1
+            .detections
+            .unwrap_or_default();
+        detections.extend(
+            uniq2
+                .detections
+                .unwrap_or_default(),
+        );
+        let detections = (!detections.is_empty()).then_some(detections);
+
+        Self {
+            detections,
+            categories,
+            is_inside,
+        }
+    }
+
+    pub(crate) fn extend_by_implied(self) -> Self {
+        let categories = self
+            .categories
+            .into_iter()
+            .flat_map(|category| {
+                category
+                    .implied_additional_categories()
+                    .to_vec()
+            })
+            .collect();
+
+        Self { categories, ..self }
+    }
 }
 
 impl FromIterator<ContextCategory> for UniqueGeographicCategories {

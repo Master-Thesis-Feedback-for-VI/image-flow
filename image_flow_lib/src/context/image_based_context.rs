@@ -1,14 +1,20 @@
 use std::fmt::Display;
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
+use std::result::Result as DefaultResult;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration as DefaultDuration;
 
 use chrono::Duration;
-use tokio::sync::{Mutex, MutexGuard, OnceCell};
+use reqwest::Url;
+use tokio::io::{AsyncWriteExt as _, BufWriter};
+use tokio::sync::Mutex;
+use tokio_stream::StreamExt;
 use tracing::instrument;
 use ultralytics_inference::{Results as DetectionResults, YOLOModel};
 
 use crate::context::{ContextCategory, UniqueGeographicCategories};
+use crate::error::ImageFlowError;
 use crate::image_processor::{DominantColors, dominant_colors};
 
 const DOMINANT_COLOR_AMOUNT: usize = 4;
@@ -22,20 +28,19 @@ const OUTSIDE_THRESHOLD: &[(DetectionType, usize)] = &[
     (DetectionType::DiningTable, 2),
 ];
 
-static MODEL: OnceCell<Mutex<YOLOModel>> = OnceCell::const_new();
-
 /// TODO
 ///
 /// # Errors
 /// TODO
 pub async fn evaluate_image_into_categories(
     frame_path: impl AsRef<Path>,
+    model: &ImageRecognizer,
 ) -> crate::Result<UniqueGeographicCategories> {
     let frame_path = frame_path.as_ref();
 
     let detections_fut = async {
         tracing::info!("Detecting objects in image...");
-        let image_detections = detect_objects_in_image(&frame_path).await;
+        let image_detections = detect_objects_in_image(&frame_path, model).await;
         tracing::info!("Finished detecting objects in image...");
         image_detections
     };
@@ -61,25 +66,11 @@ pub async fn evaluate_image_into_categories(
 /// TODO
 pub async fn detect_objects_in_image(
     frame_path: impl AsRef<Path>,
+    model: &ImageRecognizer,
 ) -> crate::Result<ImageDetections> {
-    let frame_path = frame_path
-        .as_ref()
-        .to_path_buf();
-    let mut results =
-        tokio::task::spawn_blocking(move || -> crate::Result<Vec<DetectionResults>> {
-            let handle = tokio::runtime::Handle::current();
-            let mut model = handle.block_on(lock_model())?;
-            model
-                .predict(frame_path)
-                .map_err(crate::error::image)
-        })
-        .await??;
-    assert_eq!(results.len(), 1);
-
-    let result = results.remove(0);
-    let image_detections = ImageDetections::from_detection_result(result);
-
-    Ok(image_detections)
+    model
+        .predict(frame_path)
+        .await
 }
 
 /// TODO
@@ -117,6 +108,234 @@ pub fn evaluate_image_into_categories_impl(
     }
 
     categories
+}
+
+#[derive(Debug, uniffi::Object)]
+pub struct ImageRecognizer {
+    pub model_variant: ModelVariant,
+    model_path: PathBuf,
+
+    model: Arc<Mutex<YOLOModel>>,
+}
+
+#[uniffi::export(async_runtime = "tokio")]
+impl ImageRecognizer {
+    /// # Errors
+    /// TODO
+    #[uniffi::constructor]
+    pub async fn new(
+        model_variant: ModelVariant,
+        downlaod_path: String,
+    ) -> DefaultResult<Self, ImageFlowError> {
+        let img_recognizer = Self::new_impl(model_variant, downlaod_path).await?;
+        Ok(img_recognizer)
+    }
+
+    /// # Panics
+    /// TODO
+    #[must_use]
+    pub fn model_path(&self) -> String {
+        let tmp = self
+            .model_path
+            .clone();
+        tmp.into_os_string()
+            .into_string()
+            .expect("Invalid UTF-8")
+    }
+}
+
+impl ImageRecognizer {
+    /// # Errors
+    /// TODO
+    pub async fn new_impl(
+        model_variant: ModelVariant,
+        download_path: impl AsRef<Path>,
+    ) -> crate::Result<Self> {
+        let path = download_path
+            .as_ref()
+            .to_path_buf();
+
+        if !path.is_dir() {
+            let msg = format!("The dir: {}, does not exist", path.display());
+            return Err(crate::error::io(msg));
+        }
+
+        let file_path = path.join(model_variant.model_name());
+
+        if file_path.is_file() {
+            let load_path = file_path.clone();
+            let model = tokio::task::spawn_blocking(move || -> crate::Result<YOLOModel> {
+                Ok(YOLOModel::load(load_path)?)
+            })
+            .await??;
+
+            return Ok(Self {
+                model_variant,
+                model_path: file_path,
+                model: Arc::new(Mutex::new(model)),
+            });
+        }
+
+        let tmp_path = file_path.with_extension("part");
+
+        if let Err(e) = Self::download_to(&model_variant, &tmp_path).await {
+            // Best-effort cleanup of any partial temp file.
+            let _ = tokio::fs::remove_file(&tmp_path).await;
+            return Err(e);
+        }
+
+        tokio::fs::rename(&tmp_path, &file_path)
+            .await
+            .map_err(|e| crate::error::io(format!("Failed to finalize downloaded file: {e}")))?;
+
+        let load_path = file_path.clone();
+        let model = tokio::task::spawn_blocking(move || -> crate::Result<YOLOModel> {
+            Ok(YOLOModel::load(load_path)?)
+        })
+        .await??;
+
+        Ok(Self {
+            model_variant,
+            model_path: file_path,
+            model: Arc::new(Mutex::new(model)),
+        })
+    }
+
+    /// # Errors
+    /// TODO
+    pub async fn default() -> crate::Result<Self> {
+        let model_variant = ModelVariant::Medium;
+        let download_path = Path::new(".");
+
+        Self::new_impl(model_variant, download_path).await
+    }
+
+    async fn predict(&self, path: impl AsRef<Path>) -> crate::Result<ImageDetections> {
+        let path = path
+            .as_ref()
+            .to_path_buf();
+        let model = Arc::clone(&self.model);
+
+        let mut predictions =
+            tokio::task::spawn_blocking(move || -> crate::Result<Vec<DetectionResults>> {
+                let predictions = model
+                    .blocking_lock()
+                    .predict(path)?;
+
+                Ok(predictions)
+            })
+            .await??;
+        assert_eq!(predictions.len(), 1);
+
+        let result = predictions.remove(0);
+        let image_detections = ImageDetections::from_detection_result(result);
+
+        Ok(image_detections)
+    }
+
+    /// Streams the model to `tmp_path`. Verifies size when the server reports
+    /// `Content-Length`, but doesn't hard-fail if that header is absent (some
+    /// CDNs/chunked responses omit it).
+    async fn download_to(model_variant: &ModelVariant, tmp_path: &Path) -> crate::Result<()> {
+        let download_url = model_variant.build_url();
+
+        let client = reqwest::Client::builder()
+            .timeout(DefaultDuration::from_mins(5))
+            .build()
+            .map_err(crate::error::request)?;
+
+        let response = client
+            .get(download_url)
+            .send()
+            .await
+            .map_err(crate::error::request)?;
+
+        if !response
+            .status()
+            .is_success()
+        {
+            let status = response.status();
+            return Err(crate::error::request(format!(
+                "Download failed with status: {status}"
+            )));
+        }
+
+        let expected_size = response.content_length();
+
+        let file = tokio::fs::File::create(tmp_path).await?;
+        let mut writer = BufWriter::new(file);
+
+        let mut stream = response.bytes_stream();
+        let mut written: u64 = 0;
+
+        while let Some(chunk) = stream
+            .next()
+            .await
+        {
+            let chunk = chunk.map_err(crate::error::request)?;
+            writer
+                .write_all(&chunk)
+                .await
+                .map_err(|e| crate::error::io(format!("Failed to write chunk: {e}")))?;
+            written += chunk.len() as u64;
+        }
+
+        writer
+            .flush()
+            .await
+            .map_err(|e| crate::error::io(format!("Failed to flush file: {e}")))?;
+
+        if let Some(expected) = expected_size
+            && written != expected
+        {
+            return Err(crate::error::io(format!(
+                "Downloaded file size mismatch: expected {expected}, got {written}"
+            )));
+        }
+
+        if written == 0 {
+            return Err(crate::error::io("Downloaded file is empty".to_string()));
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum ModelVariant {
+    Nano,
+    Small,
+    Medium,
+    Large,
+    XLarge,
+}
+
+static BASE_URL: LazyLock<Url> = LazyLock::new(|| {
+    let base_url = "https://github.com/ultralytics/assets/releases/download/v8.4.0/";
+
+    Url::parse(base_url).expect("We know this cant fail since the above url is valid")
+});
+
+impl ModelVariant {
+    fn build_url(&self) -> Url {
+        let mut url = BASE_URL.clone();
+
+        let model_name = self.model_name();
+        url.path_segments_mut()
+            .expect("This cannot fail since the url is valid")
+            .push(model_name);
+        url
+    }
+
+    const fn model_name(&self) -> &str {
+        match self {
+            Self::Nano => "yolo26n.onnx",
+            Self::Small => "yolo26s.onnx",
+            Self::Medium => "yolo26m.onnx",
+            Self::Large => "yolo26l.onnx",
+            Self::XLarge => "yolo26x.onnx",
+        }
+    }
 }
 
 #[derive(Debug, uniffi::Object, Clone)]
@@ -164,24 +383,6 @@ impl Drop for FramePath {
             let _ = std::fs::remove_file(&self.path);
         }
     }
-}
-
-async fn model() -> crate::Result<&'static Mutex<YOLOModel>> {
-    MODEL
-        .get_or_try_init(async || {
-            let model = tokio::task::spawn_blocking(|| YOLOModel::load("yolo26m.onnx")).await??;
-            Ok(Mutex::new(model))
-        })
-        .await
-}
-
-async fn lock_model() -> crate::Result<MutexGuard<'static, YOLOModel>> {
-    let model = model()
-        .await?
-        .lock()
-        .await;
-
-    Ok(model)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -273,6 +474,11 @@ impl ImageDetections {
                     >= *minimum
             })
     }
+
+    #[must_use]
+    pub fn into_inner(self) -> Vec<Detection> {
+        self.detections
+    }
 }
 
 impl Display for ImageDetections {
@@ -311,9 +517,19 @@ impl Deref for ImageDetections {
     }
 }
 
-impl DerefMut for ImageDetections {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.detections
+impl IntoIterator for ImageDetections {
+    type Item = Detection;
+    type IntoIter = std::vec::IntoIter<Detection>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.detections
+            .into_iter()
+    }
+}
+
+impl Extend<Detection> for ImageDetections {
+    fn extend<T: IntoIterator<Item = Detection>>(&mut self, iter: T) {
+        self.detections
+            .extend(iter);
     }
 }
 
@@ -322,7 +538,8 @@ impl DerefMut for ImageDetections {
 mod tests {
     use crate::{
         context::image_based_context::{
-            DOMINANT_COLOR_AMOUNT, detect_objects_in_image, evaluate_image_into_categories_impl,
+            DOMINANT_COLOR_AMOUNT, ImageRecognizer, detect_objects_in_image,
+            evaluate_image_into_categories_impl,
         },
         image_processor::dominant_colors,
         tests::{TESTING_FILE_MANAGER, TestingImage},
@@ -337,6 +554,10 @@ mod tests {
             binding.all_images()
         };
 
+        let model = ImageRecognizer::default()
+            .await
+            .unwrap();
+
         for TestingImage {
             img_path,
             categories,
@@ -345,7 +566,7 @@ mod tests {
             let dominate_colors = dominant_colors(&img_path, DOMINANT_COLOR_AMOUNT)
                 .await
                 .unwrap();
-            let detected_obj = detect_objects_in_image(img_path)
+            let detected_obj = detect_objects_in_image(img_path, &model)
                 .await
                 .unwrap();
 

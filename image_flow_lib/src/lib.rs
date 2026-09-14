@@ -15,7 +15,7 @@ pub mod requesters;
 #[cfg(feature = "video")]
 pub mod video_slicer;
 
-use tokio::task::JoinSet;
+use tokio::join;
 
 pub use crate::error::{Error, Result};
 
@@ -30,26 +30,28 @@ uniffi::setup_scaffolding!();
 use crate::{
     context::{
         ContextCategory, UniqueGeographicCategories,
-        image_based_context::{FramePath, ImageDetections, evaluate_image_into_categories},
+        image_based_context::{FramePath, ImageRecognizer, evaluate_image_into_categories},
         location_based_context::evaluate_location_into_categories,
     },
     error::ImageFlowError,
     location::coordinate_system::Coordinate,
 };
 use std::path::Path;
-use std::result::Result as DefaultResult;
+use std::{result::Result as DefaultResult, sync::Arc};
 
 /// TODO
 ///
 /// # Errors
 /// TODO
 #[allow(clippy::needless_pass_by_value)]
-#[uniffi::export]
+#[uniffi::export(async_runtime = "tokio")]
 pub async fn evaluate_context(
     location: Coordinate,
     frame: String,
+    image_model: Arc<ImageRecognizer>,
 ) -> DefaultResult<Vec<ContextCategory>, ImageFlowError> {
-    let categories = evaluate_context_impl(location, frame)
+    let img_model = image_model.as_ref();
+    let categories = evaluate_context_impl(location, frame, img_model)
         .await?
         .into_iter()
         .collect();
@@ -66,6 +68,7 @@ pub async fn evaluate_context(
 pub async fn evaluate_context_impl(
     location: impl Into<Coordinate>,
     frame: impl AsRef<Path>,
+    model: &ImageRecognizer,
 ) -> crate::Result<UniqueGeographicCategories> {
     if !frame
         .as_ref()
@@ -80,61 +83,24 @@ pub async fn evaluate_context_impl(
         return Err(crate::error::file_does_not_exist(err_msg));
     }
 
-    let mut set = JoinSet::new();
-
-    let location = location.into();
-    let frame = frame
-        .as_ref()
-        .to_path_buf();
-    set.spawn(async move {
+    let loc_fut = async {
         tracing::info!("Running location evaluation!");
-        let loc = evaluate_location_into_categories(location).await;
+        let loc_fut = evaluate_location_into_categories(location).await;
         tracing::info!("Finished location evaluation");
-        loc
-    });
+        loc_fut
+    };
 
-    set.spawn(async move {
+    let img_fut = async {
         tracing::info!("Running image evaluation!");
-        let img = evaluate_image_into_categories(frame)
+        let img_fut = evaluate_image_into_categories(frame, model)
             .await
             .unwrap_or_default();
         tracing::info!("Finished image evaluation");
-        img
-    });
+        img_fut
+    };
 
-    let mut collection_categories = UniqueGeographicCategories::new();
-    while let Some(category_from_set) = set
-        .join_next()
-        .await
-    {
-        if let Ok(mut category_from_set) = category_from_set {
-            let detections = category_from_set
-                .detections
-                .take();
-            collection_categories.extend(category_from_set);
+    let (loc, img) = join!(loc_fut, img_fut);
 
-            if let Some(detections) = detections {
-                let raw_detections = (*detections).clone();
-                collection_categories
-                    .detections
-                    .get_or_insert(ImageDetections::new())
-                    .extend(raw_detections);
-            }
-        }
-    }
-
-    let saved_detections = collection_categories
-        .detections
-        .take();
-    let mut categories: UniqueGeographicCategories = collection_categories
-        .into_iter()
-        .flat_map(|val| {
-            val.implied_additional_categories()
-                .iter()
-                .copied()
-        })
-        .collect();
-    categories.detections = saved_detections;
-
-    Ok(categories)
+    let collection_categories = UniqueGeographicCategories::merge(img, loc).extend_by_implied();
+    Ok(collection_categories)
 }
