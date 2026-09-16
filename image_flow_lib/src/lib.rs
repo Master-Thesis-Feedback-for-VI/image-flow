@@ -16,6 +16,7 @@ pub mod requesters;
 pub mod video_slicer;
 
 use tokio::join;
+use tracing::{Span, instrument};
 
 pub use crate::error::{Error, Result};
 
@@ -65,11 +66,31 @@ pub async fn evaluate_context(
 ///
 /// # Errors
 /// TODO
+#[instrument(
+    skip_all,
+    fields(
+        location = tracing::field::Empty,
+        frame = tracing::field::Empty,
+    )
+)]
 pub async fn evaluate_context_impl(
     location: impl Into<Coordinate>,
     frame: impl AsRef<Path>,
     model: &ImageRecognizer,
 ) -> crate::Result<UniqueGeographicCategories> {
+    let location = location.into();
+
+    let span = Span::current();
+    span.record("location", tracing::field::debug(&location));
+    span.record(
+        "frame",
+        tracing::field::display(
+            frame
+                .as_ref()
+                .display(),
+        ),
+    );
+
     if !frame
         .as_ref()
         .exists()

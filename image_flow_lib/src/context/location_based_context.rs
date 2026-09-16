@@ -1,4 +1,5 @@
 use tokio::task::JoinSet;
+use tracing::{Span, instrument};
 
 use crate::{
     context::{ContextCategory, UniqueGeographicCategories},
@@ -22,9 +23,17 @@ pub async fn evaluate_location_into_categories<T: Into<Coordinate>>(
 }
 
 impl ContextCategory {
+    #[instrument(skip_all, fields(
+        location = tracing::field::Empty,
+    ))]
     async fn extract_categories_from_nominatim<T: Into<Coordinate>>(
         coordinates: T,
     ) -> crate::Result<UniqueGeographicCategories> {
+        let coordinates = coordinates.into();
+
+        let span = Span::current();
+        span.record("location", tracing::field::debug(&coordinates));
+
         let loc_data = NominatimLocationData::from_cords(coordinates).await?;
         let mut categories = UniqueGeographicCategories::new();
 
@@ -76,6 +85,7 @@ impl ContextCategory {
             "amenity" => {
                 categories.insert(Self::Outside);
             }
+            "place" => {}
             _ => {
                 unreachable!(
                     "New Class: {location_class}, check it out here: {}",
@@ -89,13 +99,29 @@ impl ContextCategory {
         Ok(categories)
     }
 
+    #[instrument(skip_all, fields(
+        location = tracing::field::Empty,
+    ))]
     async fn extract_categories_from_overpass<T>(coordinates: T) -> UniqueGeographicCategories
     where
         T: Into<Coordinate> + Copy,
     {
+        let coordinates = coordinates.into();
+
+        let span = Span::current();
+        span.record("location", tracing::field::debug(coordinates));
+
         let mut categories = UniqueGeographicCategories::new();
 
-        let intersections = find_nearby_intersections(coordinates, 50.).await;
+        let intersections = find_nearby_intersections(coordinates, 50.)
+            .await
+            .inspect_err(|e| {
+                tracing::error!(
+                    error = %e,
+                    "intersection fetch failure"
+                );
+            });
+
         if let Ok(intersections) = intersections
             && intersections.len() >= MIN_INTERSECTION_NODES
         {
@@ -103,7 +129,15 @@ impl ContextCategory {
             categories.insert(Self::Outside);
         }
 
-        let inside_building = inside_building(coordinates).await;
+        let inside_building = inside_building(coordinates)
+            .await
+            .inspect_err(|e| {
+                tracing::error!(
+                    location = %coordinates,
+                    error = %e,
+                    "couldnt check if location is inside building"
+                );
+            });
         if let Ok(inside_building) = inside_building {
             categories.insert(inside_building);
         }
@@ -125,7 +159,10 @@ impl ContextCategory {
         set.spawn(async move {
             Self::extract_categories_from_nominatim(coordinates)
                 .await
-                .unwrap_or_else(|_| UniqueGeographicCategories::new())
+                .unwrap_or_else(|e| {
+                    tracing::error!("failed to fetch from nominatim: {e:#?}");
+                    UniqueGeographicCategories::new()
+                })
         });
         set.spawn(async move { Self::extract_categories_from_overpass(coordinates).await });
 
@@ -191,13 +228,13 @@ mod tests {
             .unwrap();
         insta::assert_debug_snapshot!(nom_data, @r#"
         NominatimLocationData {
-            name_map: None,
-            display_name: "3a, Limmerstraße, Linden-Nord, Linden-Limmer, Hannover, Region Hannover, Niedersachsen, 30451, Deutschland",
-            osm_type: "way",
             class: "building",
             location_type: "apartments",
             lat: 52.3715399,
             lon: 9.7125486,
+            _name_map: None,
+            _display_name: "3a, Limmerstraße, Linden-Nord, Linden-Limmer, Hannover, Region Hannover, Niedersachsen, 30451, Deutschland",
+            _osm_type: "way",
         }
         "#);
         insta::assert_snapshot!(&nom_data.as_coordinate().as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3715399&mlon=9.7125486#map=17/52.3715399/9.7125486");
@@ -230,13 +267,13 @@ mod tests {
             .unwrap();
         insta::assert_debug_snapshot!(nom_data, @r#"
         NominatimLocationData {
-            name_map: None,
-            display_name: "Karl-Wiechert-Allee, Groß-Buchholz, Buchholz-Kleefeld, Hannover, Region Hannover, Niedersachsen, 30625, Deutschland",
-            osm_type: "way",
             class: "highway",
             location_type: "secondary",
             lat: 52.3860214,
             lon: 9.8088121,
+            _name_map: None,
+            _display_name: "Karl-Wiechert-Allee, Groß-Buchholz, Buchholz-Kleefeld, Hannover, Region Hannover, Niedersachsen, 30625, Deutschland",
+            _osm_type: "way",
         }
         "#);
         insta::assert_snapshot!(&nom_data.as_coordinate().as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3860214&mlon=9.8088121#map=17/52.3860214/9.8088121");

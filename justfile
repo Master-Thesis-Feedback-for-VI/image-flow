@@ -98,13 +98,14 @@ create-bindings-all: create-bindings-swift create-bindings-kotlin
 clean:
     cargo clean
     rm -rf ./.android ./bindings
+    rm -rf out pipeline_out
 
-tmp_output := "out"
+tmp_output := "pipeline_out"
 
 [group('scripts')]
 pipeline video_path csv_path tmp_out serialized_output:
     mkdir -p {{tmp_out}}
-    cargo run --bin pipeline --features="video, cli" -- \
+    cargo run --bin pipeline --release --features="video, cli" -- \
         -v {{video_path}} \
         -c {{csv_path}} \
         -s {{serialized_output}} \
@@ -122,7 +123,7 @@ pipeline_small:
 
 [group('scripts')]
 pipeline_large:
-    rm -rf -p {{"." / tmp_output / "large"}}
+    rm -rf {{"." / tmp_output / "large"}}
     mkdir -p {{"." / tmp_output / "large"}}
     just pipeline \
         "sample_data/recording-2026-08-12-13-41-36/E510E1EE-D294-4EAF-8652-B95B9D72AC21.mov" \

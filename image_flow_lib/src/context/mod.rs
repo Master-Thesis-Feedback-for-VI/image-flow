@@ -51,7 +51,7 @@ impl ContextCategory {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct UniqueGeographicCategories {
-    pub detections: Option<ImageDetections>,
+    detections: Option<ImageDetections>,
     categories: HashSet<ContextCategory>,
     is_inside: bool,
 }

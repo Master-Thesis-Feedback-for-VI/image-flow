@@ -1,4 +1,3 @@
-use chrono::Duration;
 use clap::Parser;
 use image_flow::{
     context::{
@@ -9,7 +8,7 @@ use image_flow::{
     video_slicer::ImageGPSZip,
 };
 use serde::Serialize;
-use std::{fs::File, io::BufWriter, path::PathBuf};
+use std::{fs::File, io::BufWriter, path::PathBuf, time::Duration};
 use tempfile::tempdir;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -28,7 +27,7 @@ struct Args {
 
 #[derive(Serialize, Clone, Debug)]
 struct CategoryTime {
-    category: UniqueGeographicCategories,
+    categories: UniqueGeographicCategories,
     time_diff: Duration,
     location: Coordinate,
 }
@@ -36,7 +35,7 @@ struct CategoryTime {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::new("info"))
+        .with_env_filter(EnvFilter::new("error"))
         .init();
 
     let args: Args = Args::parse();
@@ -68,9 +67,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let file = File::open(args.csv)?;
     let datapoints = DataPointsGPS::from_csv(file)?;
-    let zipped =
-        ImageGPSZip::from_video_and_gps(args.vid, &datapoints, &dir_path, Duration::seconds(1))
-            .await?;
+    let zipped = ImageGPSZip::from_video_and_gps(
+        args.vid,
+        &datapoints,
+        &dir_path,
+        chrono::Duration::seconds(1),
+    )
+    .await?;
 
     let mut unique_geo_cat_collection = Vec::new();
     for (location, frame) in zipped.iter() {
@@ -78,12 +81,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         match evaluation {
             Ok(eva) => {
-                info!("{eva:#?}");
+                let time_diff: Duration = frame
+                    .time_offset_from_first_frame
+                    .to_std()
+                    .expect("It failed?");
+                info!("it was evaluated to: {eva:#?}");
                 let combined = CategoryTime {
-                    category: eva,
-                    time_diff: frame.time_offset_from_first_frame,
+                    categories: eva,
+                    time_diff,
                     location: *location,
                 };
+                println!("This data was captured:\n{combined:#?}");
                 unique_geo_cat_collection.push(combined);
             }
             Err(e) => {
