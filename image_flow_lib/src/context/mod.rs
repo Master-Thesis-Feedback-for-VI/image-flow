@@ -1,5 +1,6 @@
 use std::{
     collections::{HashSet, hash_set},
+    mem,
     sync::LazyLock,
 };
 
@@ -83,34 +84,6 @@ impl UniqueGeographicCategories {
         }
     }
 
-    pub fn extend<I>(&mut self, iter: I)
-    where
-        I: IntoIterator<Item = ContextCategory>,
-    {
-        let items: Vec<ContextCategory> = iter
-            .into_iter()
-            .collect();
-
-        let just_became_inside = !self.is_inside && items.contains(&ContextCategory::Inside);
-
-        if self.is_inside || just_became_inside {
-            self.categories
-                .extend(
-                    items
-                        .into_iter()
-                        .filter(|c| INSIDE_CATEGORIES.contains(c)),
-                );
-        } else {
-            self.categories
-                .extend(items);
-        }
-
-        if just_became_inside {
-            self.is_inside = true;
-            self.remove_outside_categories();
-        }
-    }
-
     fn remove_outside_categories(&mut self) {
         let cat = self
             .categories
@@ -128,21 +101,22 @@ impl UniqueGeographicCategories {
     }
 
     #[must_use]
-    pub fn categories(self) -> HashSet<ContextCategory> {
-        self.categories
+    pub fn categories(&mut self) -> HashSet<ContextCategory> {
+        mem::take(&mut self.categories)
     }
 
-    pub(crate) fn merge(uniq1: Self, uniq2: Self) -> Self {
-        let is_inside = uniq1.is_inside || uniq2.is_inside;
+    pub(crate) fn merge(mut self, mut other: Self) -> Self {
+        let is_inside = self.is_inside || other.is_inside;
 
-        let mut categories = uniq1.categories;
-        categories.extend(uniq2.categories);
+        let other_cats = other.categories();
+        self.extend(other_cats);
+        let categories = self.categories();
 
-        let mut detections = uniq1
+        let mut detections = self
             .detections
             .unwrap_or_default();
         detections.extend(
-            uniq2
+            other
                 .detections
                 .unwrap_or_default(),
         );
@@ -170,18 +144,41 @@ impl UniqueGeographicCategories {
     }
 }
 
-impl FromIterator<ContextCategory> for UniqueGeographicCategories {
-    fn from_iter<I: IntoIterator<Item = ContextCategory>>(iter: I) -> Self {
-        let collection: HashSet<ContextCategory> = iter
+impl Extend<ContextCategory> for UniqueGeographicCategories {
+    fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = ContextCategory>,
+    {
+        let items: Vec<ContextCategory> = iter
             .into_iter()
             .collect();
 
-        let is_inside = collection.contains(&ContextCategory::Inside);
-        Self {
-            categories: collection,
-            is_inside,
-            detections: None,
+        let just_became_inside = !self.is_inside && items.contains(&ContextCategory::Inside);
+
+        if self.is_inside || just_became_inside {
+            self.categories
+                .extend(
+                    items
+                        .into_iter()
+                        .filter(|c| INSIDE_CATEGORIES.contains(c)),
+                );
+        } else {
+            self.categories
+                .extend(items);
         }
+
+        if just_became_inside {
+            self.is_inside = true;
+            self.remove_outside_categories();
+        }
+    }
+}
+
+impl FromIterator<ContextCategory> for UniqueGeographicCategories {
+    fn from_iter<I: IntoIterator<Item = ContextCategory>>(iter: I) -> Self {
+        let mut categories = Self::new();
+        categories.extend(iter);
+        categories
     }
 }
 
@@ -202,5 +199,115 @@ impl<'a> IntoIterator for &'a UniqueGeographicCategories {
     fn into_iter(self) -> Self::IntoIter {
         self.categories
             .iter()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use rand::prelude::*;
+    use std::collections::HashSet;
+
+    use crate::context::{ContextCategory, INSIDE_CATEGORIES, UniqueGeographicCategories};
+
+    const ALL_CATS: &[ContextCategory] = &[
+        ContextCategory::Forest,
+        ContextCategory::Outside,
+        ContextCategory::Inside,
+        ContextCategory::Street,
+        ContextCategory::Pedestrian,
+        ContextCategory::Intersection,
+        ContextCategory::Elevator,
+    ];
+
+    fn randomize_context_categories() -> HashSet<ContextCategory> {
+        let mut rng = rand::rng();
+        let amount = rand::random_range(0..ALL_CATS.len());
+        ALL_CATS
+            .sample(&mut rng, amount)
+            .copied()
+            .collect()
+    }
+
+    fn valid_unique_cat(set: &UniqueGeographicCategories) -> bool {
+        let both = set.contains(ContextCategory::Inside) && set.contains(ContextCategory::Outside);
+        if both {
+            return false;
+        }
+
+        if set.contains(ContextCategory::Inside) {
+            if !set.is_inside {
+                return false;
+            }
+
+            for cat in &set.categories {
+                if !INSIDE_CATEGORIES.contains(cat) {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
+    #[test]
+    fn cannot_conatain_both() {
+        let all: HashSet<ContextCategory> = ALL_CATS
+            .iter()
+            .copied()
+            .collect();
+
+        let mut unique = UniqueGeographicCategories::new();
+        for cat in all.clone() {
+            unique.insert(cat);
+        }
+        assert!(valid_unique_cat(&unique));
+
+        let mut unique = UniqueGeographicCategories::new();
+        unique.extend(all);
+        assert!(valid_unique_cat(&unique));
+
+        let inside: UniqueGeographicCategories = INSIDE_CATEGORIES
+            .iter()
+            .copied()
+            .collect();
+        let outside: UniqueGeographicCategories =
+            vec![ContextCategory::Forest, ContextCategory::Street]
+                .into_iter()
+                .collect();
+
+        let merged1 = UniqueGeographicCategories::merge(inside.clone(), outside.clone());
+        assert!(valid_unique_cat(&merged1), "merged data: {merged1:#?}");
+
+        let merged2 = UniqueGeographicCategories::merge(outside, inside);
+        assert!(valid_unique_cat(&merged2), "merged data: {merged2:#?}");
+    }
+
+    #[test]
+    fn randomized_picks() {
+        let amount = 10usize;
+
+        for _ in 0..amount {
+            let sample = randomize_context_categories()
+                .into_iter()
+                .collect::<UniqueGeographicCategories>();
+            assert!(
+                valid_unique_cat(&sample),
+                "Non valid here is data: {sample:#?}"
+            );
+        }
+
+        for _ in 0..amount {
+            let sample1: UniqueGeographicCategories = randomize_context_categories()
+                .into_iter()
+                .collect();
+            let sample2: UniqueGeographicCategories = randomize_context_categories()
+                .into_iter()
+                .collect();
+            let sample3 = sample1.merge(sample2);
+            assert!(
+                valid_unique_cat(&sample3),
+                "Non valid here is data: {sample3:#?}"
+            );
+        }
     }
 }

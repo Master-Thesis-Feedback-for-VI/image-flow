@@ -71,6 +71,7 @@ futures-util = "0.3"
 
 [dev-dependencies]
 insta = "1.48"
+rand = "0.10"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }

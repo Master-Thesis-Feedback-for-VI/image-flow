@@ -15,6 +15,7 @@
     nasm
     git
     git-lfs
+    cargo-udeps
   ];
 
   languages = {

@@ -1513,6 +1513,7 @@ dependencies = [
  "insta",
  "kmeans_colors",
  "palette",
+ "rand 0.10.2",
  "reqwest",
  "serde",
  "serde_json",

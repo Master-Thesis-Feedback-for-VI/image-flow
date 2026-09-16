@@ -202,9 +202,9 @@ mod tests {
         "#);
         insta::assert_snapshot!(&nom_data.as_coordinate().as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3715399&mlon=9.7125486#map=17/52.3715399/9.7125486");
 
-        let should_categories: UniqueGeographicCategories =
+        let mut should_categories: UniqueGeographicCategories =
             iter::once(ContextCategory::Inside).collect();
-        let categories = ContextCategory::from_cords(element.1).await;
+        let mut categories = ContextCategory::from_cords(element.1).await;
 
         assert_eq!(should_categories.categories(), categories.categories());
     }
@@ -241,14 +241,14 @@ mod tests {
         "#);
         insta::assert_snapshot!(&nom_data.as_coordinate().as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3860214&mlon=9.8088121#map=17/52.3860214/9.8088121");
 
-        let should_category: UniqueGeographicCategories = [
+        let mut should_category: UniqueGeographicCategories = [
             ContextCategory::Outside,
             ContextCategory::Street,
             ContextCategory::Intersection,
         ]
         .into_iter()
         .collect();
-        let categories = ContextCategory::from_cords(element.1).await;
+        let mut categories = ContextCategory::from_cords(element.1).await;
         assert_eq!(should_category.categories(), categories.categories());
     }
 
