@@ -36,6 +36,7 @@ use crate::{
     },
     error::ImageFlowError,
     location::coordinate_system::Coordinate,
+    requesters::AuthToHost,
 };
 use std::path::Path;
 use std::{result::Result as DefaultResult, sync::Arc};
@@ -50,9 +51,11 @@ pub async fn evaluate_context(
     location: Coordinate,
     frame: String,
     image_model: Arc<ImageRecognizer>,
+    auth: Option<AuthToHost>,
 ) -> DefaultResult<Vec<ContextCategory>, ImageFlowError> {
     let img_model = image_model.as_ref();
-    let categories = evaluate_context_impl(location, frame, img_model)
+    let auth = auth.map(Arc::new);
+    let categories = evaluate_context_impl(location, frame, img_model, auth)
         .await?
         .into_iter()
         .collect();
@@ -77,6 +80,7 @@ pub async fn evaluate_context_impl(
     location: impl Into<Coordinate>,
     frame: impl AsRef<Path>,
     model: &ImageRecognizer,
+    auth: Option<Arc<AuthToHost>>,
 ) -> crate::Result<UniqueGeographicCategories> {
     let location = location.into();
 
@@ -106,7 +110,7 @@ pub async fn evaluate_context_impl(
 
     let loc_fut = async {
         tracing::info!("Running location evaluation!");
-        let loc_fut = evaluate_location_into_categories(location).await;
+        let loc_fut = evaluate_location_into_categories(location, auth).await;
         tracing::info!("Finished location evaluation");
         loc_fut
     };
