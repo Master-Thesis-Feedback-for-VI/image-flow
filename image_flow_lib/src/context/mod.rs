@@ -4,6 +4,8 @@ use std::{
     sync::LazyLock,
 };
 
+use serde::{Deserialize, Serialize};
+
 use crate::context::image_based_context::ImageDetections;
 
 pub mod image_based_context;
@@ -16,7 +18,9 @@ static INSIDE_CATEGORIES: LazyLock<HashSet<ContextCategory>> =
 ///
 /// <https://github.com/Master-Thesis-Feedback-for-VI/image-flow/issues/2>
 #[allow(dead_code)]
-#[derive(uniffi::Enum, Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    uniffi::Enum, Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub enum ContextCategory {
     Forest,
 
@@ -45,7 +49,7 @@ impl ContextCategory {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct UniqueGeographicCategories {
     pub detections: Option<ImageDetections>,
     categories: HashSet<ContextCategory>,

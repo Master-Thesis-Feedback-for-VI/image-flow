@@ -41,17 +41,21 @@ where
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct NominatimLocationData {
-    pub name_map: Option<String>,
-    pub display_name: String,
-    pub osm_type: String,
     pub class: String,
+
     #[serde(rename = "type")]
     pub location_type: String,
-
     #[serde(deserialize_with = "de_str_to_f64")]
     pub lat: f64,
     #[serde(deserialize_with = "de_str_to_f64")]
     pub lon: f64,
+
+    #[serde(rename = "name_map")]
+    pub _name_map: Option<String>,
+    #[serde(rename = "display_name")]
+    pub _display_name: String,
+    #[serde(rename = "osm_type")]
+    pub _osm_type: String,
 }
 
 impl NominatimLocationData {

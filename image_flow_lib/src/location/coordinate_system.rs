@@ -1,6 +1,8 @@
 use std::fmt::Display;
 
-#[derive(Debug, Clone, Copy, uniffi::Record)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, uniffi::Record, Serialize, Deserialize)]
 pub struct Coordinate {
     pub lat: f64,
     pub lon: f64,
