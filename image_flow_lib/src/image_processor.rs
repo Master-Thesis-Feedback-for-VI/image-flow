@@ -36,7 +36,8 @@ impl FromIterator<DominantColor> for DominantColors {
 #[derive(Debug, Clone, Copy)]
 pub struct DominantColor {
     rgb: Srgb<u8>,
-    percentage: f32,
+
+    _percentage: f32,
 }
 
 impl DominantColor {
@@ -168,7 +169,7 @@ pub async fn dominant_colors(
 
                 DominantColor {
                     rgb,
-                    percentage: cluster.percentage,
+                    _percentage: cluster.percentage,
                 }
             })
             .collect::<DominantColors>();

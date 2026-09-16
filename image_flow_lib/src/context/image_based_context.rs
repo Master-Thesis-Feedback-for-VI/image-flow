@@ -7,6 +7,7 @@ use std::time::Duration as DefaultDuration;
 
 use chrono::Duration;
 use reqwest::Url;
+use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncWriteExt as _, BufWriter};
 use tokio::sync::Mutex;
 use tokio_stream::StreamExt;
@@ -385,7 +386,7 @@ impl Drop for FramePath {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 enum DetectionType {
     Person,
     TrafficLight,
@@ -413,13 +414,13 @@ impl DetectionType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Detection {
     confidence: f32,
     name: DetectionType,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ImageDetections {
     detections: Vec<Detection>,
 }

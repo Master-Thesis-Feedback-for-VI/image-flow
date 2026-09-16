@@ -40,6 +40,7 @@ impl Deref for ImageGPSZip {
 impl ImageGPSZip {
     /// # Errors
     /// TODO
+    #[instrument(skip_all)]
     pub async fn from_video_and_gps(
         video_path: impl AsRef<Path>,
         tabular_data: &DataPointsGPS,

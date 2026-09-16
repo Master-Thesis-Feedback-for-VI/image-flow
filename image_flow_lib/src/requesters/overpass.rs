@@ -1,5 +1,6 @@
 use reqwest::header::{self};
 use serde::Deserialize;
+use serde_json::Value;
 use std::{collections::HashSet, fmt::Write, sync::LazyLock};
 use tokio::time::Duration;
 
@@ -30,11 +31,12 @@ const ROAD_TYPES: &str =
 ///
 /// # Errors
 /// TODO
-pub async fn fetch_raw_overpass_data(query: &str) -> crate::Result<serde_json::Value> {
+pub async fn fetch_raw_overpass_data(query: &str) -> crate::Result<Value> {
     let body = format!("data={}", urlencoding_encode(query));
 
     let urls = *OVERPASS_URLS;
     let mut last_error = None;
+
     for &url in urls {
         let response = throttled_post(url)
             .await
@@ -44,20 +46,63 @@ pub async fn fetch_raw_overpass_data(query: &str) -> crate::Result<serde_json::V
             .send()
             .await;
 
-        match response {
-            Ok(response) => match response.error_for_status() {
-                Ok(response) => {
-                    return response
-                        .json()
-                        .await
-                        .map_err(error::serialization);
-                }
-                Err(err) => {
-                    last_error = Some(error::request(err));
-                }
-            },
+        let response = match response {
+            Ok(resp) => resp,
             Err(err) => {
                 last_error = Some(error::request(err));
+                continue;
+            }
+        };
+
+        let response = match response.error_for_status() {
+            Ok(resp) => resp,
+            Err(err) => {
+                last_error = Some(error::request(err));
+                continue;
+            }
+        };
+
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| {
+                v.to_str()
+                    .ok()
+            })
+            .unwrap_or("")
+            .to_owned();
+
+        let raw_text = match response
+            .text()
+            .await
+        {
+            Ok(text) => text,
+            Err(err) => {
+                last_error = Some(error::request(err));
+                continue;
+            }
+        };
+
+        if !content_type.contains("json") {
+            tracing::error!(
+                url = %url,
+                content_type = %content_type,
+                body_preview = %raw_text.chars().take(500).collect::<String>(),
+                "overpass returned non-JSON body"
+            );
+        }
+
+        match serde_json::from_str::<Value>(&raw_text) {
+            Ok(json) => return Ok(json),
+            Err(err) => {
+                tracing::error!(
+                    url = %url,
+                    content_type = %content_type,
+                    body_preview = %raw_text.chars().take(500).collect::<String>(),
+                    error = %err,
+                    "failed to decode overpass response as JSON"
+                );
+                last_error = Some(err.into());
             }
         }
     }
@@ -156,7 +201,7 @@ fn urlencoding_encode(input: &str) -> String {
 pub async fn inside_building(coordinates: impl Into<Coordinate>) -> crate::Result<ContextCategory> {
     let Coordinate { lat, lon } = coordinates.into();
 
-    let query = format!("[out:json];is_in({lat},{lon});way._[building];out tags;");
+    let query = format!("[out:json];is_in({lat},{lon})->.a;wr(pivot.a)[building];out tags;");
     let resp = fetch_raw_overpass_data(&query).await?;
     let empty_building = resp["elements"]
         .as_array()

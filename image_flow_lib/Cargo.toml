@@ -9,13 +9,6 @@ description.workspace = true
 categories.workspace = true
 keywords.workspace = true
 
-[profile.release]
-opt-level = "z"
-lto = true
-codegen-units = 1
-panic = "abort"
-strip = true
-
 [lib]
 name = "image_flow"
 crate-type = ["cdylib", "rlib", "staticlib"]
@@ -40,10 +33,6 @@ video = ["dep:ffmpeg-next"]
 cli = ["dep:clap"]
 
 [dependencies]
-# ffmpeg-next = { version = "9", features = ["build"], optional = true }
-# opencv = { version = "0.100", features = ["clang-runtime"] }
-# toml = { version = "1.1", features = ["serde"] }
-# uuid = { version = "1.24", features = ["v7", "serde"] }
 kmeans_colors = { version = "0.7", default-features = false, features = [
   "palette_color",
 ] }
@@ -72,6 +61,7 @@ futures-util = "0.3"
 [dev-dependencies]
 insta = "1.48"
 rand = "0.10"
+ctor = "1.0"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }

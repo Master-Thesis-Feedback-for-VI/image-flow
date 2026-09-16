@@ -4,6 +4,7 @@ use std::{
     process::Command,
 };
 
+// use ctor::ctor;
 use tokio::sync::Mutex;
 
 use crate::context::ContextCategory;
@@ -181,3 +182,11 @@ async fn correct_amount_of_files() {
         "These files where found: {image_files:?}"
     );
 }
+
+// #[ctor(unsafe)]
+// fn init_tracing() {
+//     tracing_subscriber::fmt()
+//         .with_env_filter("debug")
+//         .with_test_writer()
+//         .init();
+// }
