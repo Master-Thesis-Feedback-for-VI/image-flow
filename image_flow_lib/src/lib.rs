@@ -31,7 +31,7 @@ uniffi::setup_scaffolding!();
 use crate::{
     context::{
         ContextCategory, UniqueGeographicCategories,
-        image_based_context::{FramePath, ImageRecognizer, evaluate_image_into_categories},
+        image_based_context::{ImageRecognizer, evaluate_image_into_categories},
         location_based_context::evaluate_location_into_categories,
     },
     error::ImageFlowError,

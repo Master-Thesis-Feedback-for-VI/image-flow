@@ -46,5 +46,10 @@
       version = [ "26.1.10909125" ];
     };
   };
+
+  dotenv = {
+    enable = true;
+    filename = [ ".env.production" ".env.development" ".env" ];
+  };
 }
 

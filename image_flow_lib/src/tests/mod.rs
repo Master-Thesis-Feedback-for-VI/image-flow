@@ -2,12 +2,13 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::LazyLock,
 };
 
 // use ctor::ctor;
 use tokio::sync::Mutex;
 
-use crate::context::ContextCategory;
+use crate::{context::ContextCategory, requesters::AuthToHost};
 
 pub mod location_data;
 pub mod video_data;
@@ -19,6 +20,24 @@ const TEST_REMOVE_FILES_AFTER_RERUN: bool = match option_env!("TEST_REMOVE_FILES
     Some("false" | "FALSE" | "no" | "NO") => false,
     Some(_) | None => true,
 };
+pub static AUTH_AGENT: LazyLock<Option<AuthToHost>> = LazyLock::new(|| {
+    let user_name = option_env!("USER_AGENT_NAME");
+    let passwd = option_env!("PASSWORD");
+    let url = option_env!("OVERPASS_URL");
+
+    if let Some(passwd) = passwd
+        && let Some(user) = user_name
+        && let Some(url) = url
+    {
+        Some(AuthToHost {
+            url: url.to_string(),
+            user: user.to_string(),
+            passwd: passwd.to_string(),
+        })
+    } else {
+        None
+    }
+});
 
 #[derive(Clone, Debug)]
 pub struct TestingImage {

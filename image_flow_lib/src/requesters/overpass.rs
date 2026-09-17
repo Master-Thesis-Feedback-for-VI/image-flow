@@ -28,7 +28,7 @@ static OVERPASS_URLS: LazyLock<&[&str]> = LazyLock::new(|| {
         "https://z.overpass-api.de/api/interpreter",
     ]
 });
-const OVERPASS_TIMEOUT: Duration = Duration::from_secs(10);
+const OVERPASS_TIMEOUT: Duration = Duration::from_secs(30);
 const ROAD_TYPES: &str =
     "motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street";
 

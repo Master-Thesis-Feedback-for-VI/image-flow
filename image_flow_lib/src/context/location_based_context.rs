@@ -192,13 +192,16 @@ impl ContextCategory {
 
 #[cfg(test)]
 mod tests {
-    use std::iter;
+    use std::{iter, sync::Arc};
 
     use crate::{
         context::{ContextCategory, UniqueGeographicCategories},
         location::coordinate_system::Coordinate,
         requesters::nominatim::NominatimLocationData,
-        tests::location_data::{self, INTERSECTION_LOCATIONS},
+        tests::{
+            AUTH_AGENT,
+            location_data::{self, INTERSECTION_LOCATIONS},
+        },
     };
 
     #[tokio::test]
@@ -219,6 +222,10 @@ mod tests {
 
     #[tokio::test]
     async fn apartment() {
+        let auth_agent = AUTH_AGENT
+            .clone()
+            .map(Arc::new);
+
         let loc = location_data::DANGEROUSE_LOCATIONS;
         let element = loc
             .get(2)
@@ -251,13 +258,17 @@ mod tests {
 
         let mut should_categories: UniqueGeographicCategories =
             iter::once(ContextCategory::Inside).collect();
-        let mut categories = ContextCategory::from_cords(element.1, None).await;
+        let mut categories = ContextCategory::from_cords(element.1, auth_agent).await;
 
         assert_eq!(should_categories.categories(), categories.categories());
     }
 
     #[tokio::test]
     async fn karl_wichert_allee() {
+        let auth_agent = AUTH_AGENT
+            .clone()
+            .map(Arc::new);
+
         let loc = location_data::DANGEROUSE_LOCATIONS;
         let element = loc
             .first()
@@ -295,16 +306,21 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        let mut categories = ContextCategory::from_cords(element.1, None).await;
+        let mut categories = ContextCategory::from_cords(element.1, auth_agent).await;
         assert_eq!(should_category.categories(), categories.categories());
     }
 
     #[tokio::test]
     async fn intersections() {
+        let auth_agent = AUTH_AGENT
+            .clone()
+            .map(Arc::new);
+
         let intersection_locations = INTERSECTION_LOCATIONS;
         for (name, location) in intersection_locations {
             let categories =
-                ContextCategory::extract_categories_from_overpass(*location, None).await;
+                ContextCategory::extract_categories_from_overpass(*location, auth_agent.clone())
+                    .await;
 
             let url = location.as_url_osm();
             assert!(
@@ -321,7 +337,7 @@ mod tests {
             },
         );
         let categories =
-            ContextCategory::extract_categories_from_overpass(no_intersection.1, None).await;
+            ContextCategory::extract_categories_from_overpass(no_intersection.1, auth_agent).await;
 
         let name = no_intersection.0;
         let url = no_intersection
