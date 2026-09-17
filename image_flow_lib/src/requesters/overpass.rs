@@ -1,12 +1,19 @@
 use reqwest::header::{self};
 use serde::Deserialize;
 use serde_json::Value;
-use std::{collections::HashSet, fmt::Write, sync::LazyLock};
+use std::{
+    collections::HashSet,
+    fmt::Write,
+    iter,
+    sync::{Arc, LazyLock},
+};
 use tokio::time::Duration;
 
 use crate::{
-    context::ContextCategory, error, location::coordinate_system::Coordinate,
-    requesters::client::throttled_post,
+    context::ContextCategory,
+    error,
+    location::coordinate_system::Coordinate,
+    requesters::{AuthToHost, client::throttled_post},
 };
 
 // ===== Configuration =====
@@ -21,7 +28,7 @@ static OVERPASS_URLS: LazyLock<&[&str]> = LazyLock::new(|| {
         "https://z.overpass-api.de/api/interpreter",
     ]
 });
-const OVERPASS_TIMEOUT: Duration = Duration::from_secs(10);
+const OVERPASS_TIMEOUT: Duration = Duration::from_secs(30);
 const ROAD_TYPES: &str =
     "motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street";
 
@@ -31,16 +38,52 @@ const ROAD_TYPES: &str =
 ///
 /// # Errors
 /// TODO
-pub async fn fetch_raw_overpass_data(query: &str) -> crate::Result<Value> {
+pub async fn fetch_raw_overpass_data(
+    query: &str,
+    auth: Option<Arc<AuthToHost>>,
+) -> crate::Result<Value> {
     let body = format!("data={}", urlencoding_encode(query));
 
-    let urls = *OVERPASS_URLS;
+    let auth_url = auth
+        .as_ref()
+        .map(|auth| {
+            auth.url
+                .clone()
+        });
+
+    let urls: Vec<String> = OVERPASS_URLS
+        .iter()
+        .flat_map(|&static_url| {
+            auth_url
+                .iter()
+                .cloned()
+                .chain(iter::once(static_url.to_owned()))
+        })
+        .collect();
+
     let mut last_error = None;
 
-    for &url in urls {
-        let response = throttled_post(url)
+    let mut first = true;
+    for url in &urls {
+        let mut construction = throttled_post(url)
             .await
-            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+        if first {
+            if let Some(auth) = auth.clone() {
+                construction = construction.basic_auth(
+                    auth.user
+                        .clone(),
+                    Some(
+                        auth.passwd
+                            .clone(),
+                    ),
+                );
+            }
+
+            first = false;
+        }
+
+        let response = construction
             .body(body.clone())
             .timeout(OVERPASS_TIMEOUT)
             .send()
@@ -198,11 +241,14 @@ fn urlencoding_encode(input: &str) -> String {
     out
 }
 
-pub async fn inside_building(coordinates: impl Into<Coordinate>) -> crate::Result<ContextCategory> {
+pub async fn inside_building(
+    coordinates: impl Into<Coordinate>,
+    auth: Option<Arc<AuthToHost>>,
+) -> crate::Result<ContextCategory> {
     let Coordinate { lat, lon } = coordinates.into();
 
     let query = format!("[out:json];is_in({lat},{lon})->.a;wr(pivot.a)[building];out tags;");
-    let resp = fetch_raw_overpass_data(&query).await?;
+    let resp = fetch_raw_overpass_data(&query, auth).await?;
     let empty_building = resp["elements"]
         .as_array()
         .cloned()
@@ -219,14 +265,16 @@ pub async fn inside_building(coordinates: impl Into<Coordinate>) -> crate::Resul
 pub async fn find_nearby_intersections(
     coordinates: impl Into<Coordinate>,
     radius_m: f64,
+    auth: Option<Arc<AuthToHost>>,
 ) -> crate::Result<Vec<Intersection>> {
     let coordinates: Coordinate = coordinates.into();
     let lat = coordinates.lat;
     let lon = coordinates.lon;
     let query = build_intersections_query(coordinates, radius_m);
 
-    let parsed: OverpassResponse = serde_json::from_value(fetch_raw_overpass_data(&query).await?)
-        .map_err(error::serialization)?;
+    let parsed: OverpassResponse =
+        serde_json::from_value(fetch_raw_overpass_data(&query, auth).await?)
+            .map_err(error::serialization)?;
 
     let mut seen_node_ids = HashSet::new();
     let mut intersections: Vec<Intersection> = parsed

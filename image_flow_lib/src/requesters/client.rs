@@ -27,7 +27,7 @@ static CLIENT: LazyLock<Client> = LazyLock::new(|| {
         .expect("client must be build")
 });
 static LAST_REQUEST: Mutex<Option<Instant>> = Mutex::const_new(None);
-const MIN_INTERVAL: Duration = Duration::from_millis(1_000);
+const MIN_INTERVAL: Duration = Duration::from_millis(0);
 
 // fn init_client() -> Client {
 //     let headers = default_headers();

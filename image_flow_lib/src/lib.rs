@@ -18,6 +18,7 @@ pub mod video_slicer;
 use tokio::join;
 use tracing::{Span, instrument};
 
+pub use crate::context::image_based_context::FramePath;
 pub use crate::error::{Error, Result};
 
 pub(crate) mod image_processor;
@@ -31,12 +32,14 @@ uniffi::setup_scaffolding!();
 use crate::{
     context::{
         ContextCategory, UniqueGeographicCategories,
-        image_based_context::{FramePath, ImageRecognizer, evaluate_image_into_categories},
+        image_based_context::{ImageRecognizer, evaluate_image_into_categories},
         location_based_context::evaluate_location_into_categories,
     },
     error::ImageFlowError,
     location::coordinate_system::Coordinate,
+    requesters::AuthToHost,
 };
+use std::fmt::Display;
 use std::path::Path;
 use std::{result::Result as DefaultResult, sync::Arc};
 
@@ -50,9 +53,11 @@ pub async fn evaluate_context(
     location: Coordinate,
     frame: String,
     image_model: Arc<ImageRecognizer>,
+    auth: Option<AuthToHost>,
 ) -> DefaultResult<Vec<ContextCategory>, ImageFlowError> {
     let img_model = image_model.as_ref();
-    let categories = evaluate_context_impl(location, frame, img_model)
+    let auth = auth.map(Arc::new);
+    let categories = evaluate_context_impl(location, frame, img_model, auth)
         .await?
         .into_iter()
         .collect();
@@ -77,6 +82,7 @@ pub async fn evaluate_context_impl(
     location: impl Into<Coordinate>,
     frame: impl AsRef<Path>,
     model: &ImageRecognizer,
+    auth: Option<Arc<AuthToHost>>,
 ) -> crate::Result<UniqueGeographicCategories> {
     let location = location.into();
 
@@ -106,7 +112,7 @@ pub async fn evaluate_context_impl(
 
     let loc_fut = async {
         tracing::info!("Running location evaluation!");
-        let loc_fut = evaluate_location_into_categories(location).await;
+        let loc_fut = evaluate_location_into_categories(location, auth).await;
         tracing::info!("Finished location evaluation");
         loc_fut
     };
@@ -122,6 +128,49 @@ pub async fn evaluate_context_impl(
 
     let (loc, img) = join!(loc_fut, img_fut);
 
-    let collection_categories = UniqueGeographicCategories::merge(img, loc).extend_by_implied();
+    let mut collection_categories = UniqueGeographicCategories::merge(img, loc).extend_by_implied();
+    if collection_categories.is_empty() {
+        collection_categories.insert(ContextCategory::Outside);
+    }
     Ok(collection_categories)
+}
+
+#[must_use]
+#[uniffi::export]
+pub fn enable_tracing(rust_log: Option<FilterLevel>) -> bool {
+    let rust_log = rust_log.unwrap_or_default();
+    let tag = rust_log.to_string();
+
+    tracing_subscriber::fmt()
+        .with_env_filter(tag)
+        .with_target(true)
+        .with_thread_ids(true)
+        .try_init()
+        .is_ok()
+}
+
+#[derive(uniffi::Enum, Clone, Copy, Debug, Default)]
+pub enum FilterLevel {
+    #[default]
+    Off,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+    Error,
+}
+
+impl Display for FilterLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let value = match self {
+            Self::Off => "off",
+            Self::Warn => "warn",
+            Self::Info => "info",
+            Self::Debug => "debug",
+            Self::Trace => "trace",
+            Self::Error => "error",
+        };
+
+        f.write_str(value)
+    }
 }
