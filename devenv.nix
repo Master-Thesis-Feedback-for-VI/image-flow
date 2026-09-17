@@ -49,7 +49,7 @@
 
   dotenv = {
     enable = true;
-    filename = [ ".env.production" ".env.development" ".env" ];
+    filename = [".env" ".env.production" ".env.development"];
   };
 }
 
