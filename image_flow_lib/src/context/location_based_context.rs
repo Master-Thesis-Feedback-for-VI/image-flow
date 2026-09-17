@@ -48,7 +48,7 @@ impl ContextCategory {
             "elevator" => {
                 categories.insert(Self::Elevator);
             }
-            "apartments" | "library" => {
+            "apartments" | "library" | "cafe" => {
                 categories.insert(Self::Inside);
             }
             "track" => {
@@ -67,12 +67,26 @@ impl ContextCategory {
                 categories.insert(Self::Street);
             }
             _ => {
-                unreachable!(
-                    "New location type: [[{location_type}]],\ncheck it out here: {}",
-                    loc_data
-                        .as_coordinate()
-                        .as_url_osm()
-                )
+                #[cfg(debug_assertions)]
+                {
+                    unreachable!(
+                        "New location type: [[{location_type}]],\ncheck it out here: {}",
+                        loc_data
+                            .as_coordinate()
+                            .as_url_osm()
+                    )
+                }
+                #[cfg(not(debug_assertions))]
+                {
+                    let msg = format!(
+                        "New location type: [[{location_type}]],\ncheck it out here: {}",
+                        loc_data
+                            .as_coordinate()
+                            .as_url_osm()
+                    );
+                    tracing::error!("{}", msg);
+                    return Err(crate::error::request(msg));
+                }
             }
         }
 

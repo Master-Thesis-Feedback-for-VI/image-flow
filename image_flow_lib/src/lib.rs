@@ -18,6 +18,7 @@ pub mod video_slicer;
 use tokio::join;
 use tracing::{Span, instrument};
 
+pub use crate::context::image_based_context::FramePath;
 pub use crate::error::{Error, Result};
 
 pub(crate) mod image_processor;
@@ -38,6 +39,7 @@ use crate::{
     location::coordinate_system::Coordinate,
     requesters::AuthToHost,
 };
+use std::fmt::Display;
 use std::path::Path;
 use std::{result::Result as DefaultResult, sync::Arc};
 
@@ -126,6 +128,49 @@ pub async fn evaluate_context_impl(
 
     let (loc, img) = join!(loc_fut, img_fut);
 
-    let collection_categories = UniqueGeographicCategories::merge(img, loc).extend_by_implied();
+    let mut collection_categories = UniqueGeographicCategories::merge(img, loc).extend_by_implied();
+    if collection_categories.is_empty() {
+        collection_categories.insert(ContextCategory::Outside);
+    }
     Ok(collection_categories)
+}
+
+#[must_use]
+#[uniffi::export]
+pub fn enable_tracing(rust_log: Option<FilterLevel>) -> bool {
+    let rust_log = rust_log.unwrap_or_default();
+    let tag = rust_log.to_string();
+
+    tracing_subscriber::fmt()
+        .with_env_filter(tag)
+        .with_target(true)
+        .with_thread_ids(true)
+        .try_init()
+        .is_ok()
+}
+
+#[derive(uniffi::Enum, Clone, Copy, Debug, Default)]
+pub enum FilterLevel {
+    #[default]
+    Off,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+    Error,
+}
+
+impl Display for FilterLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let value = match self {
+            Self::Off => "off",
+            Self::Warn => "warn",
+            Self::Info => "info",
+            Self::Debug => "debug",
+            Self::Trace => "trace",
+            Self::Error => "error",
+        };
+
+        f.write_str(value)
+    }
 }

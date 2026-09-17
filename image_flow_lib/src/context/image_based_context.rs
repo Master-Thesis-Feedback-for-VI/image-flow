@@ -104,9 +104,9 @@ pub fn evaluate_image_into_categories_impl(
         categories.insert(ContextCategory::Forest);
     }
 
-    if !categories.contains(ContextCategory::Outside) {
-        categories.insert(ContextCategory::Inside);
-    }
+    // if !categories.contains(ContextCategory::Outside) {
+    //     categories.insert(ContextCategory::Inside);
+    // }
 
     categories
 }

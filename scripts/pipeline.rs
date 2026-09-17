@@ -5,13 +5,39 @@ use image_flow::{
         image_based_context::{ImageRecognizer, ModelVariant::Medium},
     },
     location::{coordinate_system::Coordinate, tabular_gps::DataPointsGPS},
+    requesters::AuthToHost,
     video_slicer::ImageGPSZip,
 };
 use serde::Serialize;
-use std::{fs::File, io::BufWriter, path::PathBuf, time::Duration};
+use std::{
+    fs::File,
+    io::BufWriter,
+    path::PathBuf,
+    sync::{Arc, LazyLock},
+    time::Duration,
+};
 use tempfile::tempdir;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
+
+pub static AUTH_AGENT: LazyLock<Option<AuthToHost>> = LazyLock::new(|| {
+    let user_name = option_env!("USER_AGENT_NAME");
+    let passwd = option_env!("PASSWORD");
+    let url = option_env!("OVERPASS_URL");
+
+    if let Some(passwd) = passwd
+        && let Some(user) = user_name
+        && let Some(url) = url
+    {
+        Some(AuthToHost {
+            url: url.to_string(),
+            user: user.to_string(),
+            passwd: passwd.to_string(),
+        })
+    } else {
+        None
+    }
+});
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -37,6 +63,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::new("error"))
         .init();
+
+    let auth_agent = AUTH_AGENT
+        .clone()
+        .map(Arc::new);
 
     let args: Args = Args::parse();
     if !args
@@ -67,6 +97,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let file = File::open(args.csv)?;
     let datapoints = DataPointsGPS::from_csv(file)?;
+
+    println!("Processing Video...");
     let zipped = ImageGPSZip::from_video_and_gps(
         args.vid,
         &datapoints,
@@ -74,10 +106,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         chrono::Duration::seconds(1),
     )
     .await?;
+    println!("... finished now proceeding to data tagging");
 
     let mut unique_geo_cat_collection = Vec::new();
     for (location, frame) in zipped.iter() {
-        let evaluation = image_flow::evaluate_context_impl(*location, frame, &model).await;
+        let evaluation =
+            image_flow::evaluate_context_impl(*location, frame, &model, auth_agent.clone()).await;
 
         match evaluation {
             Ok(eva) => {

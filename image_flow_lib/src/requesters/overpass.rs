@@ -4,7 +4,7 @@ use serde_json::Value;
 use std::{
     collections::HashSet,
     fmt::Write,
-    string::ToString,
+    iter,
     sync::{Arc, LazyLock},
 };
 use tokio::time::Duration;
@@ -44,18 +44,21 @@ pub async fn fetch_raw_overpass_data(
 ) -> crate::Result<Value> {
     let body = format!("data={}", urlencoding_encode(query));
 
-    let urls: Vec<String> = auth
-        .clone()
-        .map(|val| {
-            val.url
+    let auth_url = auth
+        .as_ref()
+        .map(|auth| {
+            auth.url
                 .clone()
-        })
-        .into_iter()
-        .chain(
-            OVERPASS_URLS
+        });
+
+    let urls: Vec<String> = OVERPASS_URLS
+        .iter()
+        .flat_map(|&static_url| {
+            auth_url
                 .iter()
-                .map(ToString::to_string),
-        )
+                .cloned()
+                .chain(iter::once(static_url.to_owned()))
+        })
         .collect();
 
     let mut last_error = None;
