@@ -584,7 +584,7 @@ mod tests {
                     }
                     println!("Additionally these objects where detected: {detected_obj:?}");
 
-                    panic!();
+                    panic!("The evaluation has: {evaluation:?}\nand should contain: {category:?}")
                 }
             }
         }

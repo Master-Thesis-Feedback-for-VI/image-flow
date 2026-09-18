@@ -99,10 +99,11 @@ impl UniqueGeographicCategories {
         self.categories = cat;
     }
 
-    // fn contains(&self, context_category: ContextCategory) -> bool {
-    //     self.categories
-    //         .contains(&context_category)
-    // }
+    #[cfg(test)]
+    fn contains(&self, context_category: ContextCategory) -> bool {
+        self.categories
+            .contains(&context_category)
+    }
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
