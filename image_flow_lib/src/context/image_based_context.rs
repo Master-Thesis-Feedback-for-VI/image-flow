@@ -16,7 +16,7 @@ use ultralytics_inference::{Results as DetectionResults, YOLOModel};
 
 use crate::context::{ContextCategory, UniqueGeographicCategories};
 use crate::error::ImageFlowError;
-use crate::image_processor::DominantColors;
+use crate::image_processor::{DominantColors, dominant_colors};
 
 const TRAFFIC_LIGHT_THRESHOLD: usize = 8;
 const OUTSIDE_THRESHOLD: &[(DetectionType, usize)] = &[
@@ -28,10 +28,25 @@ const OUTSIDE_THRESHOLD: &[(DetectionType, usize)] = &[
     (DetectionType::DiningTable, 2),
 ];
 
+pub(crate) async fn _evaluate_image_into_location_tags(
+    img_path: impl AsRef<Path>,
+    model: &ImageRecognizer,
+    amount: usize,
+) -> crate::Result<UniqueGeographicCategories> {
+    let dominate_colors = dominant_colors(&img_path, amount).await?;
+    let detected_obj = model
+        .predict(img_path)
+        .await?;
+
+    let evaluations = evaluate_image_into_location_tags_impl(&dominate_colors, &detected_obj);
+
+    Ok(evaluations)
+}
+
 /// TODO
 #[instrument]
 #[must_use]
-pub fn evaluate_image_into_categories_impl(
+fn evaluate_image_into_location_tags_impl(
     dominant_colors: &DominantColors,
     detections: &ImageDetections,
 ) -> UniqueGeographicCategories {
@@ -511,10 +526,18 @@ impl Extend<Detection> for ImageDetections {
 #[allow(clippy::significant_drop_tightening)]
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use crate::{
-        context::image_based_context::{ImageRecognizer, evaluate_image_into_categories_impl},
+        context::{
+            image_based_context::{
+                _evaluate_image_into_location_tags, ImageRecognizer,
+                evaluate_image_into_location_tags_impl,
+            },
+            location_based_context::evaluate_image_and_location_as_location_tags,
+        },
         image_processor::dominant_colors,
-        tests::{DOMINANT_COLOR_AMOUNT, TESTING_FILE_MANAGER, TestingImage},
+        tests::{AUTH_AGENT, DOMINANT_COLOR_AMOUNT, TESTING_FILE_MANAGER, TestingImage},
     };
 
     #[tokio::test]
@@ -533,8 +556,11 @@ mod tests {
         for TestingImage {
             img_path,
             categories,
+            location,
         } in &image_files
         {
+            let location = location.as_ref();
+
             let dominate_colors = dominant_colors(&img_path, DOMINANT_COLOR_AMOUNT)
                 .await
                 .unwrap();
@@ -542,8 +568,19 @@ mod tests {
                 .predict(img_path)
                 .await
                 .unwrap();
-
-            let evaluation = evaluate_image_into_categories_impl(&dominate_colors, &detected_obj);
+            let evaluation = if let Some(&location) = location {
+                evaluate_image_and_location_as_location_tags(
+                    location,
+                    AUTH_AGENT
+                        .clone()
+                        .map(Arc::new),
+                    img_path,
+                    DOMINANT_COLOR_AMOUNT,
+                )
+                .await
+            } else {
+                evaluate_image_into_location_tags_impl(&dominate_colors, &detected_obj)
+            };
 
             for category in categories {
                 if !evaluation.contains(*category) {

@@ -119,19 +119,6 @@ impl UniqueGeographicCategories {
         mem::take(&mut self.categories)
     }
 
-    pub(crate) fn merge(mut self, mut other: Self) -> Self {
-        let is_inside = self.is_inside || other.is_inside;
-
-        let other_cats = other.categories();
-        self.extend(other_cats);
-        let categories = self.categories();
-
-        Self {
-            categories,
-            is_inside,
-        }
-    }
-
     pub(crate) fn extend_by_implied(self) -> Self {
         let categories = self
             .categories
@@ -278,11 +265,20 @@ mod test {
                 .into_iter()
                 .collect();
 
-        let merged1 = UniqueGeographicCategories::merge(inside.clone(), outside.clone());
-        assert!(valid_unique_cat(&merged1), "merged data: {merged1:#?}");
+        {
+            let mut inside = inside.clone();
+            let outside = outside.clone();
 
-        let merged2 = UniqueGeographicCategories::merge(outside, inside);
-        assert!(valid_unique_cat(&merged2), "merged data: {merged2:#?}");
+            inside.extend(outside);
+            assert!(valid_unique_cat(&inside), "merged data: {inside:#?}");
+        }
+
+        {
+            let mut outside = outside;
+
+            outside.extend(inside);
+            assert!(valid_unique_cat(&outside), "merged data: {outside:#?}");
+        }
     }
 
     #[test]
@@ -306,7 +302,11 @@ mod test {
             let sample2: UniqueGeographicCategories = randomize_context_categories()
                 .into_iter()
                 .collect();
-            let sample3 = sample1.merge(sample2);
+
+            let mut sample3 = UniqueGeographicCategories::new();
+            sample3.extend(sample1);
+            sample3.extend(sample2);
+
             assert!(
                 valid_unique_cat(&sample3),
                 "Non valid here is data: {sample3:#?}"

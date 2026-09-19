@@ -15,9 +15,6 @@ pub mod requesters;
 #[cfg(feature = "video")]
 pub mod video_slicer;
 
-use tokio::join;
-use tracing::{Span, instrument};
-
 pub use crate::context::image_based_context::FramePath;
 use crate::context::{
     image_based_context::ImageDetections,
@@ -34,7 +31,7 @@ pub(crate) mod tests;
 uniffi::setup_scaffolding!();
 
 use crate::{
-    context::{ContextCategory, UniqueGeographicCategories, image_based_context::ImageRecognizer},
+    context::{UniqueGeographicCategories, image_based_context::ImageRecognizer},
     error::ImageFlowError,
     location::coordinate_system::Coordinate,
     requesters::AuthToHost,
@@ -47,6 +44,26 @@ use std::{result::Result as DefaultResult, sync::Arc};
 pub struct ImageFlowEvaluation {
     location_tags: UniqueGeographicCategories,
     image_detections: ImageDetections,
+}
+
+/// # Errors
+/// TODO
+pub async fn image_flow_evaluation(
+    location: Coordinate,
+    auth: Option<AuthToHost>,
+    img_path: &str,
+    image_recognizer: Arc<ImageRecognizer>,
+    amount: u32,
+) -> crate::Result<ImageFlowEvaluation> {
+    let detections_fut = recognize_objects_in_image_impl(img_path, &image_recognizer);
+    let location_tags_fut = recognize_location_tags_impl(location, auth, img_path, amount as usize);
+
+    let (detections, location_tags) = tokio::join!(detections_fut, location_tags_fut);
+
+    Ok(ImageFlowEvaluation {
+        location_tags,
+        image_detections: detections?,
+    })
 }
 
 /// # Errors
@@ -71,116 +88,6 @@ pub async fn recognize_location_tags(
     amount: u32,
 ) -> UniqueGeographicCategories {
     recognize_location_tags_impl(location, auth, img_path, amount as usize).await
-}
-
-// === IMPLEMENTATIONS ===
-
-/// # Errors
-/// TODO
-pub async fn recognize_objects_in_image_impl(
-    path: impl AsRef<Path>,
-    image_recognizer: &ImageRecognizer,
-) -> crate::Result<ImageDetections> {
-    let path = path.as_ref();
-    if !path.exists() {
-        let err_msg = format!("the file {} does not exist", path.display());
-        return Err(crate::error::file_does_not_exist(err_msg));
-    }
-
-    image_recognizer
-        .predict(path)
-        .await
-}
-
-async fn recognize_location_tags_impl(
-    location: impl Into<Coordinate>,
-    auth: Option<AuthToHost>,
-    img_path: impl AsRef<Path>,
-    amount: usize,
-) -> UniqueGeographicCategories {
-    let auth = auth.map(Arc::new);
-    evaluate_image_and_location_as_location_tags(location, auth, img_path, amount).await
-}
-
-// === DEPRECATED ===
-
-/// TODO
-///
-/// # Errors
-/// TODO
-// #[allow(clippy::needless_pass_by_value)]
-// #[uniffi::export(async_runtime = "tokio")]
-// pub async fn evaluate_context(
-//     location: Coordinate,
-//     frame: String,
-//     image_model: Arc<ImageRecognizer>,
-//     auth: Option<AuthToHost>,
-// ) -> DefaultResult<ImageFlowEvaluation, ImageFlowError> {
-//     let img_model = image_model.as_ref();
-//     let auth = auth.map(Arc::new);
-//     let categories = evaluate_context_impl(location, frame, img_model, auth).await?;
-
-//     Ok(categories)
-// }
-
-// === Implementations ===
-
-/// TODO
-///
-/// # Errors
-/// TODO
-#[instrument(
-    skip_all,
-    fields(
-        location = tracing::field::Empty,
-        frame = tracing::field::Empty,
-    )
-)]
-pub async fn evaluate_context_impl(
-    location: impl Into<Coordinate>,
-    frame: impl AsRef<Path>,
-    model: &ImageRecognizer,
-    auth: Option<Arc<AuthToHost>>,
-) -> crate::Result<ImageFlowEvaluation> {
-    let location = location.into();
-    let frame = frame.as_ref();
-
-    let span = Span::current();
-    span.record("location", tracing::field::debug(&location));
-    span.record("frame", tracing::field::display(frame.display()));
-
-    if !frame.exists() {
-        let err_msg = format!("the file {} does not exist", frame.display());
-        return Err(crate::error::file_does_not_exist(err_msg));
-    }
-
-    let loc_fut = async {
-        tracing::info!("Running location evaluation!");
-        let loc_fut = evaluate_image_and_location_as_location_tags(location, auth, frame, 4).await;
-        tracing::info!("Finished location evaluation");
-        loc_fut
-    };
-
-    let img_fut = async {
-        tracing::info!("Running image evaluation!");
-        let img_fut = recognize_objects_in_image_impl(frame, model)
-            .await
-            .unwrap_or_default();
-        tracing::info!("Finished image evaluation");
-        img_fut
-    };
-
-    let (loc, img) = join!(loc_fut, img_fut);
-
-    let mut collection_categories = loc.extend_by_implied();
-    if collection_categories.is_empty() {
-        collection_categories.insert(ContextCategory::Outside);
-    }
-
-    Ok(ImageFlowEvaluation {
-        location_tags: collection_categories,
-        image_detections: img,
-    })
 }
 
 #[must_use]
@@ -220,5 +127,53 @@ impl Display for FilterLevel {
         };
 
         f.write_str(value)
+    }
+}
+
+// === IMPLEMENTATIONS ===
+
+/// # Errors
+/// TODO
+pub async fn recognize_objects_in_image_impl(
+    path: impl AsRef<Path>,
+    image_recognizer: &ImageRecognizer,
+) -> crate::Result<ImageDetections> {
+    let path = path.as_ref();
+    if !path.exists() {
+        let err_msg = format!("the file {} does not exist", path.display());
+        return Err(crate::error::file_does_not_exist(err_msg));
+    }
+
+    image_recognizer
+        .predict(path)
+        .await
+}
+
+async fn recognize_location_tags_impl(
+    location: impl Into<Coordinate>,
+    auth: Option<AuthToHost>,
+    img_path: impl AsRef<Path>,
+    amount: usize,
+) -> UniqueGeographicCategories {
+    let auth = auth.map(Arc::new);
+    evaluate_image_and_location_as_location_tags(location, auth, img_path, amount).await
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{
+        context::{
+            image_based_context::{
+                ImageRecognizer,
+                ModelVariant::{self, Medium},
+            },
+            location_based_context::evaluate_image_and_location_as_location_tags,
+        },
+        tests::TESTING_FILE_MANAGER,
+    };
+
+    #[tokio::test]
+    async fn check_images_with_data() {
+        todo!()
     }
 }

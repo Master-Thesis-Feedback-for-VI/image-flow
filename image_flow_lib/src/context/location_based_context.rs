@@ -168,13 +168,10 @@ impl ContextCategory {
     #[instrument(skip_all, fields(
         location = tracing::field::Empty,
     ))]
-    async fn extract_categories_from_overpass<T>(
-        coordinates: T,
+    async fn extract_categories_from_overpass(
+        coordinates: impl Into<Coordinate> + Copy,
         auth: Option<Arc<AuthToHost>>,
-    ) -> UniqueGeographicCategories
-    where
-        T: Into<Coordinate> + Copy,
-    {
+    ) -> UniqueGeographicCategories {
         let coordinates = coordinates.into();
 
         let span = Span::current();
