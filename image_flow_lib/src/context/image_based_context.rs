@@ -41,7 +41,11 @@ pub async fn evaluate_image_into_categories(
 
     let detections_fut = async {
         tracing::info!("Detecting objects in image...");
-        let image_detections = detect_objects_in_image(&frame_path, model).await;
+        // let image_detections = detect_objects_in_image(&frame_path, model).await;
+        let image_detections = model
+            .predict(frame_path)
+            .await;
+
         tracing::info!("Finished detecting objects in image...");
         image_detections
     };
@@ -57,21 +61,6 @@ pub async fn evaluate_image_into_categories(
 
     let categories = evaluate_image_into_categories_impl(&dominant_colors, &image_detections);
     Ok(categories)
-}
-
-/// TODO
-/// # Errors
-/// TODO
-///
-/// # Panics
-/// TODO
-pub async fn detect_objects_in_image(
-    frame_path: impl AsRef<Path>,
-    model: &ImageRecognizer,
-) -> crate::Result<ImageDetections> {
-    model
-        .predict(frame_path)
-        .await
 }
 
 /// TODO
@@ -565,8 +554,7 @@ impl Extend<Detection> for ImageDetections {
 mod tests {
     use crate::{
         context::image_based_context::{
-            DOMINANT_COLOR_AMOUNT, ImageRecognizer, detect_objects_in_image,
-            evaluate_image_into_categories_impl,
+            DOMINANT_COLOR_AMOUNT, ImageRecognizer, evaluate_image_into_categories_impl,
         },
         image_processor::dominant_colors,
         tests::{TESTING_FILE_MANAGER, TestingImage},
@@ -593,7 +581,8 @@ mod tests {
             let dominate_colors = dominant_colors(&img_path, DOMINANT_COLOR_AMOUNT)
                 .await
                 .unwrap();
-            let detected_obj = detect_objects_in_image(img_path, &model)
+            let detected_obj = model
+                .predict(img_path)
                 .await
                 .unwrap();
 

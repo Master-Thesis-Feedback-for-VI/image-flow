@@ -47,18 +47,55 @@ use std::{result::Result as DefaultResult, sync::Arc};
 /// # Errors
 /// TODO
 #[uniffi::export]
-pub async fn evaluate_img_tags(
+pub async fn recognize_objects_in_image(
     path: &str,
     image_recognizer: Arc<ImageRecognizer>,
 ) -> DefaultResult<ImageDetections, ImageFlowError> {
-    let detections = image_recognizer
-        .predict(path)
-        .await?;
+    let detections = recognize_objects_in_image_impl(path, image_recognizer).await?;
 
     Ok(detections)
 }
 
+/// # Errors
+/// TODO
+#[uniffi::export]
+pub async fn recognize_location_tags(
+    img_path: &str,
+    image_recognizer: Arc<ImageRecognizer>,
+) -> DefaultResult<Vec<ContextCategory>, ImageFlowError> {
+    let location_tags = recognize_location_tags_impl(img_path, &image_recognizer)
+        .await?
+        .into_iter()
+        .collect();
+
+    Ok(location_tags)
+}
+
 // === IMPLEMENTATIONS ===
+
+/// # Errors
+/// TODO
+pub async fn recognize_objects_in_image_impl(
+    path: impl AsRef<Path>,
+    image_recognizer: Arc<ImageRecognizer>,
+) -> crate::Result<ImageDetections> {
+    let path = path.as_ref();
+    if !path.exists() {
+        let err_msg = format!("the file {} does not exist", path.display());
+        return Err(crate::error::file_does_not_exist(err_msg));
+    }
+
+    image_recognizer
+        .predict(path)
+        .await
+}
+
+async fn recognize_location_tags_impl(
+    img_path: impl AsRef<Path>,
+    image_recognizer: &ImageRecognizer,
+) -> crate::Result<UniqueGeographicCategories> {
+    todo!()
+}
 
 // === DEPRECATED ===
 
