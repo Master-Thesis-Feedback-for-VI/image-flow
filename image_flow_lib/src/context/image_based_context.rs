@@ -14,9 +14,9 @@ use tokio_stream::StreamExt;
 use tracing::instrument;
 use ultralytics_inference::{Results as DetectionResults, YOLOModel};
 
-use crate::context::{ContextCategory, UniqueGeographicCategories};
+use crate::context::{LocationTag, UniqueLocationTags};
 use crate::error::ImageFlowError;
-use crate::image_processor::{DominantColors, dominant_colors};
+use crate::image_processor::DominantColors;
 
 const TRAFFIC_LIGHT_THRESHOLD: usize = 8;
 const OUTSIDE_THRESHOLD: &[(DetectionType, usize)] = &[
@@ -28,48 +28,33 @@ const OUTSIDE_THRESHOLD: &[(DetectionType, usize)] = &[
     (DetectionType::DiningTable, 2),
 ];
 
-pub(crate) async fn _evaluate_image_into_location_tags(
-    img_path: impl AsRef<Path>,
-    model: &ImageRecognizer,
-    amount: usize,
-) -> crate::Result<UniqueGeographicCategories> {
-    let dominate_colors = dominant_colors(&img_path, amount).await?;
-    let detected_obj = model
-        .predict(img_path)
-        .await?;
-
-    let evaluations = evaluate_image_into_location_tags_impl(&dominate_colors, &detected_obj);
-
-    Ok(evaluations)
-}
-
 /// TODO
 #[instrument]
 #[must_use]
-fn evaluate_image_into_location_tags_impl(
+pub(crate) fn evaluate_image_into_location_tags(
     dominant_colors: &DominantColors,
     detections: &ImageDetections,
-) -> UniqueGeographicCategories {
-    let mut categories = UniqueGeographicCategories::new();
+) -> UniqueLocationTags {
+    let mut categories = UniqueLocationTags::new();
 
     let is_outside = detections.is_outside(OUTSIDE_THRESHOLD);
     if is_outside {
-        categories.insert(ContextCategory::Outside);
+        categories.insert(LocationTag::Outside);
     }
 
     let intersection_count = detections
         .get_by_detected_object(DetectionType::TrafficLight)
         .count();
     if intersection_count > TRAFFIC_LIGHT_THRESHOLD {
-        categories.insert(ContextCategory::Intersection);
+        categories.insert(LocationTag::Intersection);
     }
 
     let in_forest = dominant_colors
         .iter()
         .any(|color| color.is_close_to_forest_green());
     if in_forest {
-        categories.insert(ContextCategory::Outside);
-        categories.insert(ContextCategory::Forest);
+        categories.insert(LocationTag::Outside);
+        categories.insert(LocationTag::Forest);
     }
     categories
 }
@@ -520,82 +505,5 @@ impl Extend<Detection> for ImageDetections {
     fn extend<T: IntoIterator<Item = Detection>>(&mut self, iter: T) {
         self.detections
             .extend(iter);
-    }
-}
-
-#[allow(clippy::significant_drop_tightening)]
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use crate::{
-        context::{
-            image_based_context::{
-                _evaluate_image_into_location_tags, ImageRecognizer,
-                evaluate_image_into_location_tags_impl,
-            },
-            location_based_context::evaluate_image_and_location_as_location_tags,
-        },
-        image_processor::dominant_colors,
-        tests::{AUTH_AGENT, DOMINANT_COLOR_AMOUNT, TESTING_FILE_MANAGER, TestingImage},
-    };
-
-    #[tokio::test]
-    async fn check_detections() {
-        let image_files = {
-            let mut binding = TESTING_FILE_MANAGER
-                .lock()
-                .await;
-            binding.all_images()
-        };
-
-        let model = ImageRecognizer::default()
-            .await
-            .unwrap();
-
-        for TestingImage {
-            img_path,
-            categories,
-            location,
-        } in &image_files
-        {
-            let location = location.as_ref();
-
-            let dominate_colors = dominant_colors(&img_path, DOMINANT_COLOR_AMOUNT)
-                .await
-                .unwrap();
-            let detected_obj = model
-                .predict(img_path)
-                .await
-                .unwrap();
-            let evaluation = if let Some(&location) = location {
-                evaluate_image_and_location_as_location_tags(
-                    location,
-                    AUTH_AGENT
-                        .clone()
-                        .map(Arc::new),
-                    img_path,
-                    DOMINANT_COLOR_AMOUNT,
-                )
-                .await
-            } else {
-                evaluate_image_into_location_tags_impl(&dominate_colors, &detected_obj)
-            };
-
-            for category in categories {
-                if !evaluation.contains(*category) {
-                    println!(
-                        "This image: {}\nIt contained these colors:",
-                        img_path.display()
-                    );
-                    for color in dominate_colors.iter() {
-                        println!("h, s, v = {color}");
-                    }
-                    println!("Additionally these objects where detected: {detected_obj:?}");
-
-                    panic!("The evaluation has: {evaluation:?}\nand should contain: {category:?}")
-                }
-            }
-        }
     }
 }

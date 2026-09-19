@@ -1,10 +1,10 @@
-use std::{path::Path, sync::Arc};
+use std::sync::Arc;
 
 use tracing::{Span, instrument};
 
 use crate::{
-    context::{ContextCategory, UniqueGeographicCategories},
-    image_processor::dominant_colors,
+    context::{LocationTag, UniqueLocationTags},
+    image_processor::DominantColors,
     location::coordinate_system::Coordinate,
     requesters::{
         AuthToHost,
@@ -18,29 +18,24 @@ const MIN_INTERSECTION_NODES: usize = 2;
 pub async fn evaluate_image_and_location_as_location_tags(
     pos: impl Into<Coordinate>,
     auth: Option<Arc<AuthToHost>>,
-    img_path: impl AsRef<Path>,
-    amount: usize,
-) -> UniqueGeographicCategories {
-    let location_cat_fut = evaluate_location_as_loaction_tags(pos, auth);
-    let image_cat_fut = evaluate_image_as_location_tags(img_path, amount);
+    dominant_colors: &DominantColors,
+) -> UniqueLocationTags {
+    let location_cat = evaluate_location_as_loaction_tags(pos, auth).await;
+    let image_cat = evaluate_image_as_location_tags(dominant_colors);
 
-    let mut cats = UniqueGeographicCategories::new();
-    let (location_cat, image_cat) = tokio::join!(location_cat_fut, image_cat_fut);
+    let mut cats = UniqueLocationTags::new();
 
     cats.extend(location_cat);
     cats.extend(image_cat);
     cats.extend_by_implied()
 }
 
-pub async fn evaluate_image_as_location_tags(
-    img_path: impl AsRef<Path>,
-    amount: usize,
-) -> UniqueGeographicCategories {
-    let dominant_colors = dominant_colors(img_path, amount).await;
-
-    let cats = match dominant_colors.map(|value| value.any_close_to_forest_green()) {
-        Ok(true) => UniqueGeographicCategories::new_singular(ContextCategory::Forest),
-        Ok(false) | Err(_) => UniqueGeographicCategories::new(),
+#[must_use]
+pub fn evaluate_image_as_location_tags(dominant_colors: &DominantColors) -> UniqueLocationTags {
+    let cats = if dominant_colors.any_close_to_forest_green() {
+        UniqueLocationTags::new_singular(LocationTag::Forest)
+    } else {
+        UniqueLocationTags::new()
     };
 
     cats.extend_by_implied()
@@ -53,20 +48,20 @@ pub async fn evaluate_image_as_location_tags(
 pub async fn evaluate_location_as_loaction_tags(
     pos: impl Into<Coordinate>,
     auth: Option<Arc<AuthToHost>>,
-) -> UniqueGeographicCategories {
+) -> UniqueLocationTags {
     let coordinates: Coordinate = pos.into();
 
-    let overpass_fut = ContextCategory::extract_categories_from_overpass(coordinates, auth);
+    let overpass_fut = LocationTag::extract_categories_from_overpass(coordinates, auth);
     let nominatim_fut = async {
-        ContextCategory::extract_categories_from_nominatim(coordinates)
+        LocationTag::extract_categories_from_nominatim(coordinates)
             .await
             .unwrap_or_else(|e| {
                 tracing::error!("failed to fetch from nominatim: {e:#?}");
-                UniqueGeographicCategories::new()
+                UniqueLocationTags::new()
             })
     };
 
-    let mut categories = UniqueGeographicCategories::new();
+    let mut categories = UniqueLocationTags::new();
     let (overpass_category, nominatim_category) = tokio::join!(overpass_fut, nominatim_fut);
 
     categories.extend(overpass_category);
@@ -74,20 +69,20 @@ pub async fn evaluate_location_as_loaction_tags(
     categories
 }
 
-impl ContextCategory {
+impl LocationTag {
     #[instrument(skip_all, fields(
         location = tracing::field::Empty,
     ))]
     async fn extract_categories_from_nominatim<T: Into<Coordinate>>(
         coordinates: T,
-    ) -> crate::Result<UniqueGeographicCategories> {
+    ) -> crate::Result<UniqueLocationTags> {
         let coordinates = coordinates.into();
 
         let span = Span::current();
         span.record("location", tracing::field::debug(&coordinates));
 
         let loc_data = NominatimLocationData::from_cords(coordinates).await?;
-        let mut categories = UniqueGeographicCategories::new();
+        let mut categories = UniqueLocationTags::new();
 
         let location_type = loc_data
             .location_type
@@ -171,13 +166,13 @@ impl ContextCategory {
     async fn extract_categories_from_overpass(
         coordinates: impl Into<Coordinate> + Copy,
         auth: Option<Arc<AuthToHost>>,
-    ) -> UniqueGeographicCategories {
+    ) -> UniqueLocationTags {
         let coordinates = coordinates.into();
 
         let span = Span::current();
         span.record("location", tracing::field::debug(coordinates));
 
-        let mut categories = UniqueGeographicCategories::new();
+        let mut categories = UniqueLocationTags::new();
 
         let intersections = find_nearby_intersections(coordinates, 50., auth.clone())
             .await
@@ -218,7 +213,7 @@ mod tests {
 
     use crate::{
         context::{
-            ContextCategory, UniqueGeographicCategories,
+            LocationTag, UniqueLocationTags,
             location_based_context::evaluate_location_as_loaction_tags,
         },
         location::coordinate_system::Coordinate,
@@ -239,7 +234,7 @@ mod tests {
         .concat();
 
         for (_name, loc) in all_locs {
-            _ = ContextCategory::extract_categories_from_nominatim(loc)
+            _ = LocationTag::extract_categories_from_nominatim(loc)
                 .await
                 .unwrap();
         }
@@ -281,8 +276,7 @@ mod tests {
         "#);
         insta::assert_snapshot!(&nom_data.as_coordinate().as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3715399&mlon=9.7125486#map=17/52.3715399/9.7125486");
 
-        let mut should_categories: UniqueGeographicCategories =
-            iter::once(ContextCategory::Inside).collect();
+        let mut should_categories: UniqueLocationTags = iter::once(LocationTag::Inside).collect();
         let mut categories = evaluate_location_as_loaction_tags(element.1, auth_agent).await;
 
         assert_eq!(should_categories.categories(), categories.categories());
@@ -324,10 +318,10 @@ mod tests {
         "#);
         insta::assert_snapshot!(&nom_data.as_coordinate().as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3860214&mlon=9.8088121#map=17/52.3860214/9.8088121");
 
-        let mut should_category: UniqueGeographicCategories = [
-            ContextCategory::Outside,
-            ContextCategory::Street,
-            ContextCategory::Intersection,
+        let mut should_category: UniqueLocationTags = [
+            LocationTag::Outside,
+            LocationTag::Street,
+            LocationTag::Intersection,
         ]
         .into_iter()
         .collect();
@@ -344,12 +338,11 @@ mod tests {
         let intersection_locations = INTERSECTION_LOCATIONS;
         for (name, location) in intersection_locations {
             let categories =
-                ContextCategory::extract_categories_from_overpass(*location, auth_agent.clone())
-                    .await;
+                LocationTag::extract_categories_from_overpass(*location, auth_agent.clone()).await;
 
             let url = location.as_url_osm();
             assert!(
-                categories.contains(ContextCategory::Intersection),
+                categories.contains(LocationTag::Intersection),
                 "Location: {name} does not have a intersection although it should. Check out this url to inspect the location: {url}"
             );
         }
@@ -362,14 +355,14 @@ mod tests {
             },
         );
         let categories =
-            ContextCategory::extract_categories_from_overpass(no_intersection.1, auth_agent).await;
+            LocationTag::extract_categories_from_overpass(no_intersection.1, auth_agent).await;
 
         let name = no_intersection.0;
         let url = no_intersection
             .1
             .as_url_osm();
         assert!(
-            !categories.contains(ContextCategory::Intersection),
+            !categories.contains(LocationTag::Intersection),
             "Location: {name} does not have a intersection although it should. Check out this url to inspect the location: {url}"
         );
     }

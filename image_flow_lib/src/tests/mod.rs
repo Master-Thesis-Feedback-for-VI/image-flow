@@ -9,7 +9,7 @@ use std::{
 use tokio::sync::Mutex;
 
 use crate::{
-    context::ContextCategory, location::coordinate_system::Coordinate, requesters::AuthToHost,
+    context::LocationTag, location::coordinate_system::Coordinate, requesters::AuthToHost,
 };
 
 pub mod location_data;
@@ -45,7 +45,7 @@ pub static AUTH_AGENT: LazyLock<Option<AuthToHost>> = LazyLock::new(|| {
 #[derive(Clone, Debug)]
 pub struct TestingImage {
     pub img_path: PathBuf,
-    pub categories: Vec<ContextCategory>,
+    pub categories: Vec<LocationTag>,
     pub location: Option<Coordinate>,
 }
 
@@ -111,9 +111,9 @@ impl TestingFileManger {
             .all_images
             .get_or_insert_with(move || {
                 let folders = [
-                    (image_dir.join("outside"), ContextCategory::Outside),
-                    (image_dir.join("forest"), ContextCategory::Forest),
-                    (image_dir.join("inside"), ContextCategory::Inside),
+                    (image_dir.join("outside"), LocationTag::Outside),
+                    (image_dir.join("forest"), LocationTag::Forest),
+                    (image_dir.join("inside"), LocationTag::Inside),
                 ];
 
                 folders
@@ -209,7 +209,7 @@ impl TestingFileManger {
     }
 }
 
-const AMOUNT_OF_IMAGES: usize = 10;
+const AMOUNT_OF_IMAGES: usize = 11;
 
 #[allow(clippy::significant_drop_tightening)]
 #[tokio::test]

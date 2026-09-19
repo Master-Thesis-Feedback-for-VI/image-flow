@@ -1,3 +1,4 @@
+#![recursion_limit = "512"]
 #![feature(const_trait_impl)]
 #![cfg_attr(test, feature(const_cmp))]
 #![allow(
@@ -16,11 +17,15 @@ pub mod requesters;
 pub mod video_slicer;
 
 pub use crate::context::image_based_context::FramePath;
-use crate::context::{
-    image_based_context::ImageDetections,
-    location_based_context::evaluate_image_and_location_as_location_tags,
-};
+use crate::context::image_based_context::evaluate_image_into_location_tags;
 pub use crate::error::{Error, Result};
+use crate::{
+    context::{
+        image_based_context::ImageDetections,
+        location_based_context::evaluate_image_and_location_as_location_tags,
+    },
+    image_processor::dominant_colors,
+};
 
 pub(crate) mod image_processor;
 
@@ -31,7 +36,7 @@ pub(crate) mod tests;
 uniffi::setup_scaffolding!();
 
 use crate::{
-    context::{UniqueGeographicCategories, image_based_context::ImageRecognizer},
+    context::{UniqueLocationTags, image_based_context::ImageRecognizer},
     error::ImageFlowError,
     location::coordinate_system::Coordinate,
     requesters::AuthToHost,
@@ -42,7 +47,7 @@ use std::{result::Result as DefaultResult, sync::Arc};
 
 #[derive(Debug, uniffi::Record)]
 pub struct ImageFlowEvaluation {
-    location_tags: UniqueGeographicCategories,
+    location_tags: UniqueLocationTags,
     image_detections: ImageDetections,
 }
 
@@ -54,16 +59,12 @@ pub async fn image_flow_evaluation(
     img_path: &str,
     image_recognizer: Arc<ImageRecognizer>,
     amount: u32,
-) -> crate::Result<ImageFlowEvaluation> {
-    let detections_fut = recognize_objects_in_image_impl(img_path, &image_recognizer);
-    let location_tags_fut = recognize_location_tags_impl(location, auth, img_path, amount as usize);
+) -> DefaultResult<ImageFlowEvaluation, ImageFlowError> {
+    let img_flow =
+        image_flow_evaluation_impl(location, auth, img_path, &image_recognizer, amount as usize)
+            .await?;
 
-    let (detections, location_tags) = tokio::join!(detections_fut, location_tags_fut);
-
-    Ok(ImageFlowEvaluation {
-        location_tags,
-        image_detections: detections?,
-    })
+    Ok(img_flow)
 }
 
 /// # Errors
@@ -86,9 +87,13 @@ pub async fn recognize_location_tags(
     auth: Option<AuthToHost>,
     img_path: &str,
     amount: u32,
-) -> UniqueGeographicCategories {
-    recognize_location_tags_impl(location, auth, img_path, amount as usize).await
+) -> DefaultResult<UniqueLocationTags, ImageFlowError> {
+    let eval = recognize_location_tags_impl(location, auth, img_path, amount as usize).await?;
+
+    Ok(eval)
 }
+
+// === LOGGING ===
 
 #[must_use]
 #[uniffi::export]
@@ -154,24 +159,60 @@ async fn recognize_location_tags_impl(
     auth: Option<AuthToHost>,
     img_path: impl AsRef<Path>,
     amount: usize,
-) -> UniqueGeographicCategories {
+) -> crate::Result<UniqueLocationTags> {
+    let img_path = img_path.as_ref();
+    if !img_path.exists() {
+        let err_msg = format!("the file {} does not exist", img_path.display());
+        return Err(crate::error::file_does_not_exist(err_msg));
+    }
+
     let auth = auth.map(Arc::new);
-    evaluate_image_and_location_as_location_tags(location, auth, img_path, amount).await
+
+    let dominant_color = dominant_colors(img_path, amount).await?;
+    let evaluation =
+        evaluate_image_and_location_as_location_tags(location, auth, &dominant_color).await;
+
+    Ok(evaluation)
+}
+
+// TODO improve performance by parallalizing here
+async fn image_flow_evaluation_impl(
+    location: impl Into<Coordinate>,
+    auth: Option<AuthToHost>,
+    img_path: impl AsRef<Path>,
+    image_recognizer: &ImageRecognizer,
+    amount: usize,
+) -> crate::Result<ImageFlowEvaluation> {
+    let img_path = img_path.as_ref();
+    if !img_path.exists() {
+        let err_msg = format!("the file {} does not exist", img_path.display());
+        return Err(crate::error::file_does_not_exist(err_msg));
+    }
+
+    let detections_fut = recognize_objects_in_image_impl(&img_path, image_recognizer);
+
+    let dominant_colors = dominant_colors(img_path, amount).await?;
+    let location_tags_fut = evaluate_image_and_location_as_location_tags(
+        location,
+        auth.map(Arc::new),
+        &dominant_colors,
+    );
+
+    let (image_detections, mut location_tags) = tokio::join!(detections_fut, location_tags_fut);
+    let image_detections = image_detections?;
+
+    let additional_categories =
+        evaluate_image_into_location_tags(&dominant_colors, &image_detections);
+    location_tags.extend(additional_categories);
+
+    Ok(ImageFlowEvaluation {
+        location_tags,
+        image_detections,
+    })
 }
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        context::{
-            image_based_context::{
-                ImageRecognizer,
-                ModelVariant::{self, Medium},
-            },
-            location_based_context::evaluate_image_and_location_as_location_tags,
-        },
-        tests::TESTING_FILE_MANAGER,
-    };
-
     #[tokio::test]
     async fn check_images_with_data() {
         todo!()
