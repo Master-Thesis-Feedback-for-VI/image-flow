@@ -15,6 +15,13 @@ pub struct DominantColors {
     colors: Vec<DominantColor>,
 }
 
+impl DominantColors {
+    pub fn any_close_to_forest_green(&self) -> bool {
+        self.iter()
+            .any(|color| color.is_close_to_forest_green())
+    }
+}
+
 impl Deref for DominantColors {
     type Target = Vec<DominantColor>;
 

@@ -1,10 +1,10 @@
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 
-use tokio::task::JoinSet;
 use tracing::{Span, instrument};
 
 use crate::{
     context::{ContextCategory, UniqueGeographicCategories},
+    image_processor::dominant_colors,
     location::coordinate_system::Coordinate,
     requesters::{
         AuthToHost,
@@ -15,15 +15,63 @@ use crate::{
 
 const MIN_INTERSECTION_NODES: usize = 2;
 
+pub async fn evaluate_image_and_location_as_location_tags(
+    pos: impl Into<Coordinate>,
+    auth: Option<Arc<AuthToHost>>,
+    img_path: impl AsRef<Path>,
+    amount: usize,
+) -> UniqueGeographicCategories {
+    let location_cat_fut = evaluate_location_as_loaction_tags(pos, auth);
+    let image_cat_fut = evaluate_image_as_location_tags(img_path, amount);
+
+    let mut cats = UniqueGeographicCategories::new();
+    let (location_cat, image_cat) = tokio::join!(location_cat_fut, image_cat_fut);
+
+    cats.extend(location_cat);
+    cats.extend(image_cat);
+    cats.extend_by_implied()
+}
+
+pub async fn evaluate_image_as_location_tags(
+    img_path: impl AsRef<Path>,
+    amount: usize,
+) -> UniqueGeographicCategories {
+    let dominant_colors = dominant_colors(img_path, amount).await;
+
+    let cats = match dominant_colors.map(|value| value.any_close_to_forest_green()) {
+        Ok(true) => UniqueGeographicCategories::new_singular(ContextCategory::Forest),
+        Ok(false) | Err(_) => UniqueGeographicCategories::new(),
+    };
+
+    cats.extend_by_implied()
+}
+
 /// TODO
 ///
 /// # Errors
 /// TODO
-pub async fn evaluate_location_into_categories<T: Into<Coordinate>>(
-    pos: T,
+pub async fn evaluate_location_as_loaction_tags(
+    pos: impl Into<Coordinate>,
     auth: Option<Arc<AuthToHost>>,
 ) -> UniqueGeographicCategories {
-    ContextCategory::from_cords(pos, auth).await
+    let coordinates: Coordinate = pos.into();
+
+    let overpass_fut = ContextCategory::extract_categories_from_overpass(coordinates, auth);
+    let nominatim_fut = async {
+        ContextCategory::extract_categories_from_nominatim(coordinates)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::error!("failed to fetch from nominatim: {e:#?}");
+                UniqueGeographicCategories::new()
+            })
+    };
+
+    let mut categories = UniqueGeographicCategories::new();
+    let (overpass_category, nominatim_category) = tokio::join!(overpass_fut, nominatim_fut);
+
+    categories.extend(overpass_category);
+    categories.extend(nominatim_category);
+    categories
 }
 
 impl ContextCategory {
@@ -165,43 +213,6 @@ impl ContextCategory {
 
         categories
     }
-
-    /// TODO
-    ///
-    /// # Errors
-    /// TODO
-    pub async fn from_cords<T>(
-        coordinates: T,
-        auth: Option<Arc<AuthToHost>>,
-    ) -> UniqueGeographicCategories
-    where
-        T: Into<Coordinate>,
-    {
-        let coordinates: Coordinate = coordinates.into();
-
-        let mut set = JoinSet::new();
-        set.spawn(async move {
-            Self::extract_categories_from_nominatim(coordinates)
-                .await
-                .unwrap_or_else(|e| {
-                    tracing::error!("failed to fetch from nominatim: {e:#?}");
-                    UniqueGeographicCategories::new()
-                })
-        });
-        set.spawn(async move { Self::extract_categories_from_overpass(coordinates, auth).await });
-
-        let mut categories = UniqueGeographicCategories::new();
-        while let Some(api_categorie) = set
-            .join_next()
-            .await
-        {
-            if let Ok(api_categorie) = api_categorie {
-                categories.extend(api_categorie);
-            }
-        }
-
-        categories
-    }
 }
 
 #[cfg(test)]
@@ -209,7 +220,10 @@ mod tests {
     use std::{iter, sync::Arc};
 
     use crate::{
-        context::{ContextCategory, UniqueGeographicCategories},
+        context::{
+            ContextCategory, UniqueGeographicCategories,
+            location_based_context::evaluate_location_as_loaction_tags,
+        },
         location::coordinate_system::Coordinate,
         requesters::nominatim::NominatimLocationData,
         tests::{
@@ -272,7 +286,7 @@ mod tests {
 
         let mut should_categories: UniqueGeographicCategories =
             iter::once(ContextCategory::Inside).collect();
-        let mut categories = ContextCategory::from_cords(element.1, auth_agent).await;
+        let mut categories = evaluate_location_as_loaction_tags(element.1, auth_agent).await;
 
         assert_eq!(should_categories.categories(), categories.categories());
     }
@@ -320,7 +334,7 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        let mut categories = ContextCategory::from_cords(element.1, auth_agent).await;
+        let mut categories = evaluate_location_as_loaction_tags(element.1, auth_agent).await;
         assert_eq!(should_category.categories(), categories.categories());
     }
 

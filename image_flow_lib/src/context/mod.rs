@@ -6,8 +6,6 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::context::image_based_context::ImageDetections;
-
 pub mod image_based_context;
 pub mod location_based_context;
 
@@ -49,9 +47,8 @@ impl ContextCategory {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, uniffi::Record)]
 pub struct UniqueGeographicCategories {
-    detections: Option<ImageDetections>,
     categories: HashSet<ContextCategory>,
     is_inside: bool,
 }
@@ -61,9 +58,15 @@ impl UniqueGeographicCategories {
     pub fn new() -> Self {
         Self {
             categories: HashSet::new(),
-            detections: None,
             is_inside: false,
         }
+    }
+
+    #[must_use]
+    pub fn new_singular(category: ContextCategory) -> Self {
+        let mut uniq = Self::new();
+        uniq.insert(category);
+        uniq
     }
 
     #[must_use]
@@ -123,18 +126,7 @@ impl UniqueGeographicCategories {
         self.extend(other_cats);
         let categories = self.categories();
 
-        let mut detections = self
-            .detections
-            .unwrap_or_default();
-        detections.extend(
-            other
-                .detections
-                .unwrap_or_default(),
-        );
-        let detections = (!detections.is_empty()).then_some(detections);
-
         Self {
-            detections,
             categories,
             is_inside,
         }

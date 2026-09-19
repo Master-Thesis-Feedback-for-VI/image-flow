@@ -13,6 +13,7 @@ use crate::{context::ContextCategory, requesters::AuthToHost};
 pub mod location_data;
 pub mod video_data;
 
+pub const DOMINANT_COLOR_AMOUNT: usize = 4;
 pub static TESTING_FILE_MANAGER: Mutex<TestingFileManger> =
     Mutex::const_new(TestingFileManger::new());
 

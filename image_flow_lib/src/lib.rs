@@ -19,7 +19,10 @@ use tokio::join;
 use tracing::{Span, instrument};
 
 pub use crate::context::image_based_context::FramePath;
-use crate::context::image_based_context::ImageDetections;
+use crate::context::{
+    image_based_context::ImageDetections,
+    location_based_context::evaluate_image_and_location_as_location_tags,
+};
 pub use crate::error::{Error, Result};
 
 pub(crate) mod image_processor;
@@ -31,11 +34,7 @@ pub(crate) mod tests;
 uniffi::setup_scaffolding!();
 
 use crate::{
-    context::{
-        ContextCategory, UniqueGeographicCategories,
-        image_based_context::{ImageRecognizer, evaluate_image_into_categories},
-        location_based_context::evaluate_location_into_categories,
-    },
+    context::{ContextCategory, UniqueGeographicCategories, image_based_context::ImageRecognizer},
     error::ImageFlowError,
     location::coordinate_system::Coordinate,
     requesters::AuthToHost,
@@ -44,6 +43,12 @@ use std::fmt::Display;
 use std::path::Path;
 use std::{result::Result as DefaultResult, sync::Arc};
 
+#[derive(Debug, uniffi::Record)]
+pub struct ImageFlowEvaluation {
+    location_tags: UniqueGeographicCategories,
+    image_detections: ImageDetections,
+}
+
 /// # Errors
 /// TODO
 #[uniffi::export]
@@ -51,7 +56,7 @@ pub async fn recognize_objects_in_image(
     path: &str,
     image_recognizer: Arc<ImageRecognizer>,
 ) -> DefaultResult<ImageDetections, ImageFlowError> {
-    let detections = recognize_objects_in_image_impl(path, image_recognizer).await?;
+    let detections = recognize_objects_in_image_impl(path, &image_recognizer).await?;
 
     Ok(detections)
 }
@@ -60,15 +65,12 @@ pub async fn recognize_objects_in_image(
 /// TODO
 #[uniffi::export]
 pub async fn recognize_location_tags(
+    location: Coordinate,
+    auth: Option<AuthToHost>,
     img_path: &str,
-    image_recognizer: Arc<ImageRecognizer>,
-) -> DefaultResult<Vec<ContextCategory>, ImageFlowError> {
-    let location_tags = recognize_location_tags_impl(img_path, &image_recognizer)
-        .await?
-        .into_iter()
-        .collect();
-
-    Ok(location_tags)
+    amount: u32,
+) -> UniqueGeographicCategories {
+    recognize_location_tags_impl(location, auth, img_path, amount as usize).await
 }
 
 // === IMPLEMENTATIONS ===
@@ -77,7 +79,7 @@ pub async fn recognize_location_tags(
 /// TODO
 pub async fn recognize_objects_in_image_impl(
     path: impl AsRef<Path>,
-    image_recognizer: Arc<ImageRecognizer>,
+    image_recognizer: &ImageRecognizer,
 ) -> crate::Result<ImageDetections> {
     let path = path.as_ref();
     if !path.exists() {
@@ -91,10 +93,13 @@ pub async fn recognize_objects_in_image_impl(
 }
 
 async fn recognize_location_tags_impl(
+    location: impl Into<Coordinate>,
+    auth: Option<AuthToHost>,
     img_path: impl AsRef<Path>,
-    image_recognizer: &ImageRecognizer,
-) -> crate::Result<UniqueGeographicCategories> {
-    todo!()
+    amount: usize,
+) -> UniqueGeographicCategories {
+    let auth = auth.map(Arc::new);
+    evaluate_image_and_location_as_location_tags(location, auth, img_path, amount).await
 }
 
 // === DEPRECATED ===
@@ -103,23 +108,20 @@ async fn recognize_location_tags_impl(
 ///
 /// # Errors
 /// TODO
-#[allow(clippy::needless_pass_by_value)]
-#[uniffi::export(async_runtime = "tokio")]
-pub async fn evaluate_context(
-    location: Coordinate,
-    frame: String,
-    image_model: Arc<ImageRecognizer>,
-    auth: Option<AuthToHost>,
-) -> DefaultResult<Vec<ContextCategory>, ImageFlowError> {
-    let img_model = image_model.as_ref();
-    let auth = auth.map(Arc::new);
-    let categories = evaluate_context_impl(location, frame, img_model, auth)
-        .await?
-        .into_iter()
-        .collect();
+// #[allow(clippy::needless_pass_by_value)]
+// #[uniffi::export(async_runtime = "tokio")]
+// pub async fn evaluate_context(
+//     location: Coordinate,
+//     frame: String,
+//     image_model: Arc<ImageRecognizer>,
+//     auth: Option<AuthToHost>,
+// ) -> DefaultResult<ImageFlowEvaluation, ImageFlowError> {
+//     let img_model = image_model.as_ref();
+//     let auth = auth.map(Arc::new);
+//     let categories = evaluate_context_impl(location, frame, img_model, auth).await?;
 
-    Ok(categories)
-}
+//     Ok(categories)
+// }
 
 // === Implementations ===
 
@@ -139,43 +141,29 @@ pub async fn evaluate_context_impl(
     frame: impl AsRef<Path>,
     model: &ImageRecognizer,
     auth: Option<Arc<AuthToHost>>,
-) -> crate::Result<UniqueGeographicCategories> {
+) -> crate::Result<ImageFlowEvaluation> {
     let location = location.into();
+    let frame = frame.as_ref();
 
     let span = Span::current();
     span.record("location", tracing::field::debug(&location));
-    span.record(
-        "frame",
-        tracing::field::display(
-            frame
-                .as_ref()
-                .display(),
-        ),
-    );
+    span.record("frame", tracing::field::display(frame.display()));
 
-    if !frame
-        .as_ref()
-        .exists()
-    {
-        let err_msg = format!(
-            "the file {} does not exist",
-            frame
-                .as_ref()
-                .display()
-        );
+    if !frame.exists() {
+        let err_msg = format!("the file {} does not exist", frame.display());
         return Err(crate::error::file_does_not_exist(err_msg));
     }
 
     let loc_fut = async {
         tracing::info!("Running location evaluation!");
-        let loc_fut = evaluate_location_into_categories(location, auth).await;
+        let loc_fut = evaluate_image_and_location_as_location_tags(location, auth, frame, 4).await;
         tracing::info!("Finished location evaluation");
         loc_fut
     };
 
     let img_fut = async {
         tracing::info!("Running image evaluation!");
-        let img_fut = evaluate_image_into_categories(frame, model)
+        let img_fut = recognize_objects_in_image_impl(frame, model)
             .await
             .unwrap_or_default();
         tracing::info!("Finished image evaluation");
@@ -184,11 +172,15 @@ pub async fn evaluate_context_impl(
 
     let (loc, img) = join!(loc_fut, img_fut);
 
-    let mut collection_categories = UniqueGeographicCategories::merge(img, loc).extend_by_implied();
+    let mut collection_categories = loc.extend_by_implied();
     if collection_categories.is_empty() {
         collection_categories.insert(ContextCategory::Outside);
     }
-    Ok(collection_categories)
+
+    Ok(ImageFlowEvaluation {
+        location_tags: collection_categories,
+        image_detections: img,
+    })
 }
 
 #[must_use]

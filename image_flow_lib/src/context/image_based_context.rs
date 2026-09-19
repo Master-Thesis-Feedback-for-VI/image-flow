@@ -16,9 +16,8 @@ use ultralytics_inference::{Results as DetectionResults, YOLOModel};
 
 use crate::context::{ContextCategory, UniqueGeographicCategories};
 use crate::error::ImageFlowError;
-use crate::image_processor::{DominantColors, dominant_colors};
+use crate::image_processor::DominantColors;
 
-const DOMINANT_COLOR_AMOUNT: usize = 4;
 const TRAFFIC_LIGHT_THRESHOLD: usize = 8;
 const OUTSIDE_THRESHOLD: &[(DetectionType, usize)] = &[
     (DetectionType::Person, 7),
@@ -30,40 +29,6 @@ const OUTSIDE_THRESHOLD: &[(DetectionType, usize)] = &[
 ];
 
 /// TODO
-///
-/// # Errors
-/// TODO
-pub async fn evaluate_image_into_categories(
-    frame_path: impl AsRef<Path>,
-    model: &ImageRecognizer,
-) -> crate::Result<UniqueGeographicCategories> {
-    let frame_path = frame_path.as_ref();
-
-    let detections_fut = async {
-        tracing::info!("Detecting objects in image...");
-        // let image_detections = detect_objects_in_image(&frame_path, model).await;
-        let image_detections = model
-            .predict(frame_path)
-            .await;
-
-        tracing::info!("Finished detecting objects in image...");
-        image_detections
-    };
-
-    let colors_fut = async {
-        tracing::info!("Detecting colors in image...");
-        let dominant_colors = dominant_colors(frame_path, DOMINANT_COLOR_AMOUNT).await;
-        tracing::info!("Finished detecting colors in image...");
-        dominant_colors
-    };
-
-    let (image_detections, dominant_colors) = tokio::try_join!(detections_fut, colors_fut)?;
-
-    let categories = evaluate_image_into_categories_impl(&dominant_colors, &image_detections);
-    Ok(categories)
-}
-
-/// TODO
 #[instrument]
 #[must_use]
 pub fn evaluate_image_into_categories_impl(
@@ -71,7 +36,6 @@ pub fn evaluate_image_into_categories_impl(
     detections: &ImageDetections,
 ) -> UniqueGeographicCategories {
     let mut categories = UniqueGeographicCategories::new();
-    categories.detections = Some(detections.clone());
 
     let is_outside = detections.is_outside(OUTSIDE_THRESHOLD);
     if is_outside {
@@ -92,11 +56,6 @@ pub fn evaluate_image_into_categories_impl(
         categories.insert(ContextCategory::Outside);
         categories.insert(ContextCategory::Forest);
     }
-
-    // if !categories.contains(ContextCategory::Outside) {
-    //     categories.insert(ContextCategory::Inside);
-    // }
-
     categories
 }
 
@@ -553,11 +512,9 @@ impl Extend<Detection> for ImageDetections {
 #[cfg(test)]
 mod tests {
     use crate::{
-        context::image_based_context::{
-            DOMINANT_COLOR_AMOUNT, ImageRecognizer, evaluate_image_into_categories_impl,
-        },
+        context::image_based_context::{ImageRecognizer, evaluate_image_into_categories_impl},
         image_processor::dominant_colors,
-        tests::{TESTING_FILE_MANAGER, TestingImage},
+        tests::{DOMINANT_COLOR_AMOUNT, TESTING_FILE_MANAGER, TestingImage},
     };
 
     #[tokio::test]
