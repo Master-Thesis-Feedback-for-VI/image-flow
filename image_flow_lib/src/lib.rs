@@ -19,6 +19,7 @@ use tokio::join;
 use tracing::{Span, instrument};
 
 pub use crate::context::image_based_context::FramePath;
+use crate::context::image_based_context::ImageDetections;
 pub use crate::error::{Error, Result};
 
 pub(crate) mod image_processor;
@@ -42,6 +43,24 @@ use crate::{
 use std::fmt::Display;
 use std::path::Path;
 use std::{result::Result as DefaultResult, sync::Arc};
+
+/// # Errors
+/// TODO
+#[uniffi::export]
+pub async fn evaluate_img_tags(
+    path: &str,
+    image_recognizer: Arc<ImageRecognizer>,
+) -> DefaultResult<ImageDetections, ImageFlowError> {
+    let detections = image_recognizer
+        .predict(path)
+        .await?;
+
+    Ok(detections)
+}
+
+// === IMPLEMENTATIONS ===
+
+// === DEPRECATED ===
 
 /// TODO
 ///

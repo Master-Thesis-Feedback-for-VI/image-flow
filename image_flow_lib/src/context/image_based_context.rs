@@ -211,7 +211,14 @@ impl ImageRecognizer {
         Self::new_impl(model_variant, download_path).await
     }
 
-    async fn predict(&self, path: impl AsRef<Path>) -> crate::Result<ImageDetections> {
+    /// # Errors
+    /// TODO
+    ///
+    /// # Panics
+    /// The API from Ulatralytics is weird here. Per image 1 Results struct is created containing
+    /// all Results and detections from one image. So having multiple makes no sense and there
+    /// always only exists one Results even if nothing is detected!
+    pub async fn predict(&self, path: impl AsRef<Path>) -> crate::Result<ImageDetections> {
         let path = path
             .as_ref()
             .to_path_buf();
@@ -229,7 +236,7 @@ impl ImageRecognizer {
         assert_eq!(predictions.len(), 1);
 
         let result = predictions.remove(0);
-        let image_detections = ImageDetections::from_detection_result(result);
+        let image_detections = ImageDetections::from_detection_result(&result);
 
         Ok(image_detections)
     }
@@ -386,7 +393,7 @@ impl Drop for FramePath {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, uniffi::Enum)]
 enum DetectionType {
     Person,
     TrafficLight,
@@ -414,13 +421,22 @@ impl DetectionType {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, uniffi::Record)]
+pub struct BoundingBox {
+    x1: f32,
+    x2: f32,
+    y1: f32,
+    y2: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Record)]
 pub struct Detection {
     confidence: f32,
     name: DetectionType,
+    xyxy: BoundingBox,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, uniffi::Record)]
 pub struct ImageDetections {
     detections: Vec<Detection>,
 }
@@ -434,11 +450,20 @@ impl ImageDetections {
     }
 
     #[instrument]
-    fn from_detection_result(res: DetectionResults) -> Self {
+    fn from_detection_result(res: &DetectionResults) -> Self {
         let mut detections = Vec::new();
 
-        if let Some(boxes) = res.boxes {
+        if let Some(boxes) = &res.boxes {
             for i in 0..boxes.len() {
+                let xyxy_tmp = boxes.xyxy();
+                let xyxy_row = xyxy_tmp.row(i);
+                let xyxy = BoundingBox {
+                    x1: xyxy_row[0],
+                    x2: xyxy_row[2],
+                    y1: xyxy_row[1],
+                    y2: xyxy_row[3],
+                };
+
                 let cls = boxes.cls()[i] as usize;
                 let conf = boxes.conf()[i];
                 let name = res
@@ -449,6 +474,7 @@ impl ImageDetections {
                 let detection = Detection {
                     name: DetectionType::from_str(name),
                     confidence: conf,
+                    xyxy,
                 };
                 detections.push(detection);
             }
@@ -506,7 +532,7 @@ impl Display for ImageDetections {
 
 impl From<DetectionResults> for ImageDetections {
     fn from(value: DetectionResults) -> Self {
-        Self::from_detection_result(value)
+        Self::from_detection_result(&value)
     }
 }
 
