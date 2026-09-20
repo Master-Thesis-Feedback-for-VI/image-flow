@@ -164,7 +164,7 @@ impl LocationTag {
         location = tracing::field::Empty,
     ))]
     async fn extract_categories_from_overpass(
-        coordinates: impl Into<Coordinate> + Copy,
+        coordinates: impl Into<Coordinate>,
         auth: Option<Arc<AuthToHost>>,
     ) -> UniqueLocationTags {
         let coordinates = coordinates.into();
@@ -219,7 +219,7 @@ mod tests {
         location::coordinate_system::Coordinate,
         requesters::nominatim::NominatimLocationData,
         tests::{
-            AUTH_AGENT,
+            AUTH_AGENT, fetch_img,
             location_data::{self, INTERSECTION_LOCATIONS},
         },
     };
@@ -330,7 +330,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn intersections() {
+    async fn intersections_test() {
         let auth_agent = AUTH_AGENT
             .clone()
             .map(Arc::new);
@@ -365,5 +365,17 @@ mod tests {
             !categories.contains(LocationTag::Intersection),
             "Location: {name} does not have a intersection although it should. Check out this url to inspect the location: {url}"
         );
+    }
+
+    #[tokio::test]
+    async fn check_inside_building() {
+        let auth = AUTH_AGENT
+            .clone()
+            .map(Arc::new);
+        let luetzeken = fetch_img("luetzekenstrasse.png").await;
+
+        let tags = LocationTag::extract_categories_from_overpass(luetzeken, auth).await;
+
+        assert!(tags.contains(LocationTag::Inside));
     }
 }

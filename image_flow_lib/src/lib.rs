@@ -58,6 +58,7 @@ pub struct ImageFlowEvaluation {
 
 /// # Errors
 /// TODO
+#[uniffi::export(async_runtime = "tokio")]
 pub async fn image_flow_evaluation(
     location: Coordinate,
     auth: Option<AuthToHost>,
@@ -74,7 +75,7 @@ pub async fn image_flow_evaluation(
 
 /// # Errors
 /// TODO
-#[uniffi::export]
+#[uniffi::export(async_runtime = "tokio")]
 pub async fn recognize_objects_in_image(
     path: &str,
     image_recognizer: Arc<ImageRecognizer>,
@@ -86,7 +87,7 @@ pub async fn recognize_objects_in_image(
 
 /// # Errors
 /// TODO
-#[uniffi::export]
+#[uniffi::export(async_runtime = "tokio")]
 pub async fn recognize_location_tags(
     location: Coordinate,
     auth: Option<AuthToHost>,
@@ -233,18 +234,10 @@ mod test {
     use std::sync::Arc;
 
     use crate::{
-        context::image_based_context::ImageRecognizer,
+        context::{LocationTag, image_based_context::ImageRecognizer},
         image_flow_evaluation, recognize_location_tags, recognize_objects_in_image,
-        tests::{AUTH_AGENT, DOMINANT_COLOR_AMOUNT, TESTING_FILE_MANAGER, TestingImage},
+        tests::{AUTH_AGENT, DOMINANT_COLOR_AMOUNT, fetch_img},
     };
-
-    async fn fetch_img(name: &str) -> TestingImage {
-        TESTING_FILE_MANAGER
-            .lock()
-            .await
-            .find_by_name(name)
-            .unwrap()
-    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn image_flow_check() {
@@ -327,10 +320,14 @@ mod test {
             .to_str()
             .unwrap();
 
-        let evaluation =
-            recognize_location_tags(location, auth, img_path, DOMINANT_COLOR_AMOUNT as u32)
-                .await
-                .unwrap();
+        let evaluation = recognize_location_tags(
+            location,
+            auth.clone(),
+            img_path,
+            DOMINANT_COLOR_AMOUNT as u32,
+        )
+        .await
+        .unwrap();
 
         insta::assert_debug_snapshot!(evaluation, @"
         UniqueLocationTags {
@@ -340,5 +337,23 @@ mod test {
             is_inside: true,
         }
         ");
+
+        let luetzeken = fetch_img("luetzekenstrasse.png").await;
+
+        let evaluation = recognize_location_tags(
+            luetzeken
+                .clone()
+                .into(),
+            auth,
+            luetzeken
+                .img_path
+                .to_str()
+                .unwrap(),
+            DOMINANT_COLOR_AMOUNT as u32,
+        )
+        .await
+        .unwrap();
+        insta::assert_debug_snapshot!(evaluation);
+        assert!(evaluation.contains(LocationTag::Inside));
     }
 }

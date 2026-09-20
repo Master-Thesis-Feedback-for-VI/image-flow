@@ -303,3 +303,34 @@ pub async fn find_nearby_intersections(
     });
     Ok(intersections)
 }
+
+#[cfg(test)]
+mod test {
+    use std::sync::Arc;
+
+    use crate::{
+        context::LocationTag,
+        requesters::overpass::inside_building,
+        tests::{AUTH_AGENT, fetch_img},
+    };
+
+    #[tokio::test]
+    async fn is_inside_building_test() {
+        let auth = AUTH_AGENT
+            .clone()
+            .map(Arc::new);
+
+        let mhh = fetch_img("MHH.png").await;
+        let luetzeken = fetch_img("luetzekenstrasse.png").await;
+
+        let res = inside_building(mhh, auth.clone())
+            .await
+            .unwrap();
+        assert_eq!(res, LocationTag::Inside);
+
+        let res = inside_building(luetzeken, auth)
+            .await
+            .unwrap();
+        assert_eq!(res, LocationTag::Inside);
+    }
+}

@@ -42,11 +42,34 @@ pub static AUTH_AGENT: LazyLock<Option<AuthToHost>> = LazyLock::new(|| {
     }
 });
 
+pub async fn fetch_img(name: &str) -> TestingImage {
+    TESTING_FILE_MANAGER
+        .lock()
+        .await
+        .find_by_name(name)
+        .unwrap()
+}
+
 #[derive(Clone, Debug)]
 pub struct TestingImage {
     pub img_path: PathBuf,
     pub categories: Vec<LocationTag>,
     pub location: Option<Coordinate>,
+}
+
+#[allow(clippy::fallible_impl_from)]
+impl From<TestingImage> for Coordinate {
+    fn from(value: TestingImage) -> Self {
+        value
+            .location
+            .unwrap()
+    }
+}
+
+impl AsRef<Path> for TestingImage {
+    fn as_ref(&self) -> &Path {
+        &self.img_path
+    }
 }
 
 pub struct TestingFileManger {
@@ -221,7 +244,7 @@ impl TestingFileManger {
     }
 }
 
-const AMOUNT_OF_IMAGES: usize = 12;
+const AMOUNT_OF_IMAGES: usize = 13;
 
 #[allow(clippy::significant_drop_tightening)]
 #[tokio::test]

@@ -103,7 +103,8 @@ impl UniqueLocationTags {
     }
 
     #[cfg(test)]
-    fn contains(&self, context_category: LocationTag) -> bool {
+    #[must_use]
+    pub fn contains(&self, context_category: LocationTag) -> bool {
         self.categories
             .contains(&context_category)
     }

@@ -1,0 +1,10 @@
+---
+source: image_flow_lib/src/lib.rs
+expression: evaluation
+---
+UniqueLocationTags {
+    categories: {
+        Inside,
+    },
+    is_inside: true,
+}
