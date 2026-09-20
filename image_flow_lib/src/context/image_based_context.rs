@@ -14,11 +14,10 @@ use tokio_stream::StreamExt;
 use tracing::instrument;
 use ultralytics_inference::{Results as DetectionResults, YOLOModel};
 
-use crate::context::{ContextCategory, UniqueGeographicCategories};
+use crate::context::{LocationTag, UniqueLocationTags};
 use crate::error::ImageFlowError;
-use crate::image_processor::{DominantColors, dominant_colors};
+use crate::image_processor::DominantColors;
 
-const DOMINANT_COLOR_AMOUNT: usize = 4;
 const TRAFFIC_LIGHT_THRESHOLD: usize = 8;
 const OUTSIDE_THRESHOLD: &[(DetectionType, usize)] = &[
     (DetectionType::Person, 7),
@@ -30,84 +29,33 @@ const OUTSIDE_THRESHOLD: &[(DetectionType, usize)] = &[
 ];
 
 /// TODO
-///
-/// # Errors
-/// TODO
-pub async fn evaluate_image_into_categories(
-    frame_path: impl AsRef<Path>,
-    model: &ImageRecognizer,
-) -> crate::Result<UniqueGeographicCategories> {
-    let frame_path = frame_path.as_ref();
-
-    let detections_fut = async {
-        tracing::info!("Detecting objects in image...");
-        let image_detections = detect_objects_in_image(&frame_path, model).await;
-        tracing::info!("Finished detecting objects in image...");
-        image_detections
-    };
-
-    let colors_fut = async {
-        tracing::info!("Detecting colors in image...");
-        let dominant_colors = dominant_colors(frame_path, DOMINANT_COLOR_AMOUNT).await;
-        tracing::info!("Finished detecting colors in image...");
-        dominant_colors
-    };
-
-    let (image_detections, dominant_colors) = tokio::try_join!(detections_fut, colors_fut)?;
-
-    let categories = evaluate_image_into_categories_impl(&dominant_colors, &image_detections);
-    Ok(categories)
-}
-
-/// TODO
-/// # Errors
-/// TODO
-///
-/// # Panics
-/// TODO
-pub async fn detect_objects_in_image(
-    frame_path: impl AsRef<Path>,
-    model: &ImageRecognizer,
-) -> crate::Result<ImageDetections> {
-    model
-        .predict(frame_path)
-        .await
-}
-
-/// TODO
 #[instrument]
 #[must_use]
-pub fn evaluate_image_into_categories_impl(
+pub(crate) fn evaluate_image_into_location_tags(
     dominant_colors: &DominantColors,
     detections: &ImageDetections,
-) -> UniqueGeographicCategories {
-    let mut categories = UniqueGeographicCategories::new();
-    categories.detections = Some(detections.clone());
+) -> UniqueLocationTags {
+    let mut categories = UniqueLocationTags::new();
 
     let is_outside = detections.is_outside(OUTSIDE_THRESHOLD);
     if is_outside {
-        categories.insert(ContextCategory::Outside);
+        categories.insert(LocationTag::Outside);
     }
 
     let intersection_count = detections
         .get_by_detected_object(DetectionType::TrafficLight)
         .count();
     if intersection_count > TRAFFIC_LIGHT_THRESHOLD {
-        categories.insert(ContextCategory::Intersection);
+        categories.insert(LocationTag::Intersection);
     }
 
     let in_forest = dominant_colors
         .iter()
         .any(|color| color.is_close_to_forest_green());
     if in_forest {
-        categories.insert(ContextCategory::Outside);
-        categories.insert(ContextCategory::Forest);
+        categories.insert(LocationTag::Outside);
+        categories.insert(LocationTag::Forest);
     }
-
-    // if !categories.contains(ContextCategory::Outside) {
-    //     categories.insert(ContextCategory::Inside);
-    // }
-
     categories
 }
 
@@ -211,7 +159,14 @@ impl ImageRecognizer {
         Self::new_impl(model_variant, download_path).await
     }
 
-    async fn predict(&self, path: impl AsRef<Path>) -> crate::Result<ImageDetections> {
+    /// # Errors
+    /// TODO
+    ///
+    /// # Panics
+    /// The API from Ulatralytics is weird here. Per image 1 Results struct is created containing
+    /// all Results and detections from one image. So having multiple makes no sense and there
+    /// always only exists one Results even if nothing is detected!
+    pub async fn predict(&self, path: impl AsRef<Path>) -> crate::Result<ImageDetections> {
         let path = path
             .as_ref()
             .to_path_buf();
@@ -229,7 +184,7 @@ impl ImageRecognizer {
         assert_eq!(predictions.len(), 1);
 
         let result = predictions.remove(0);
-        let image_detections = ImageDetections::from_detection_result(result);
+        let image_detections = ImageDetections::from_detection_result(&result);
 
         Ok(image_detections)
     }
@@ -386,7 +341,7 @@ impl Drop for FramePath {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, uniffi::Enum)]
 enum DetectionType {
     Person,
     TrafficLight,
@@ -395,6 +350,11 @@ enum DetectionType {
     Bench,
     Chair,
     DiningTable,
+
+    Cup,
+    Handbag,
+    Laptop,
+
     Unknown(String),
 }
 
@@ -409,18 +369,30 @@ impl DetectionType {
             "bench" => Self::Bench,
             "chair" => Self::Chair,
             "dining table" => Self::DiningTable,
+            "cup" => Self::Cup,
+            "handbag" => Self::Handbag,
+            "laptop" => Self::Laptop,
             _ => Self::Unknown(name),
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, uniffi::Record)]
+pub struct BoundingBox {
+    x1: f32,
+    x2: f32,
+    y1: f32,
+    y2: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Record)]
 pub struct Detection {
     confidence: f32,
     name: DetectionType,
+    xyxy: BoundingBox,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, uniffi::Record)]
 pub struct ImageDetections {
     detections: Vec<Detection>,
 }
@@ -434,11 +406,20 @@ impl ImageDetections {
     }
 
     #[instrument]
-    fn from_detection_result(res: DetectionResults) -> Self {
+    fn from_detection_result(res: &DetectionResults) -> Self {
         let mut detections = Vec::new();
 
-        if let Some(boxes) = res.boxes {
+        if let Some(boxes) = &res.boxes {
             for i in 0..boxes.len() {
+                let xyxy_tmp = boxes.xyxy();
+                let xyxy_row = xyxy_tmp.row(i);
+                let xyxy = BoundingBox {
+                    x1: xyxy_row[0],
+                    x2: xyxy_row[2],
+                    y1: xyxy_row[1],
+                    y2: xyxy_row[3],
+                };
+
                 let cls = boxes.cls()[i] as usize;
                 let conf = boxes.conf()[i];
                 let name = res
@@ -449,6 +430,7 @@ impl ImageDetections {
                 let detection = Detection {
                     name: DetectionType::from_str(name),
                     confidence: conf,
+                    xyxy,
                 };
                 detections.push(detection);
             }
@@ -506,7 +488,7 @@ impl Display for ImageDetections {
 
 impl From<DetectionResults> for ImageDetections {
     fn from(value: DetectionResults) -> Self {
-        Self::from_detection_result(value)
+        Self::from_detection_result(&value)
     }
 }
 
@@ -531,62 +513,5 @@ impl Extend<Detection> for ImageDetections {
     fn extend<T: IntoIterator<Item = Detection>>(&mut self, iter: T) {
         self.detections
             .extend(iter);
-    }
-}
-
-#[allow(clippy::significant_drop_tightening)]
-#[cfg(test)]
-mod tests {
-    use crate::{
-        context::image_based_context::{
-            DOMINANT_COLOR_AMOUNT, ImageRecognizer, detect_objects_in_image,
-            evaluate_image_into_categories_impl,
-        },
-        image_processor::dominant_colors,
-        tests::{TESTING_FILE_MANAGER, TestingImage},
-    };
-
-    #[tokio::test]
-    async fn check_detections() {
-        let image_files = {
-            let mut binding = TESTING_FILE_MANAGER
-                .lock()
-                .await;
-            binding.all_images()
-        };
-
-        let model = ImageRecognizer::default()
-            .await
-            .unwrap();
-
-        for TestingImage {
-            img_path,
-            categories,
-        } in &image_files
-        {
-            let dominate_colors = dominant_colors(&img_path, DOMINANT_COLOR_AMOUNT)
-                .await
-                .unwrap();
-            let detected_obj = detect_objects_in_image(img_path, &model)
-                .await
-                .unwrap();
-
-            let evaluation = evaluate_image_into_categories_impl(&dominate_colors, &detected_obj);
-
-            for category in categories {
-                if !evaluation.contains(*category) {
-                    println!(
-                        "This image: {}\nIt contained these colors:",
-                        img_path.display()
-                    );
-                    for color in dominate_colors.iter() {
-                        println!("h, s, v = {color}");
-                    }
-                    println!("Additionally these objects where detected: {detected_obj:?}");
-
-                    panic!();
-                }
-            }
-        }
     }
 }

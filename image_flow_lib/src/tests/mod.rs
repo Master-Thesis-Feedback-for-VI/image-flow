@@ -1,5 +1,5 @@
 use std::{
-    fs,
+    fs::{self, File},
     path::{Path, PathBuf},
     process::Command,
     sync::LazyLock,
@@ -8,11 +8,14 @@ use std::{
 // use ctor::ctor;
 use tokio::sync::Mutex;
 
-use crate::{context::ContextCategory, requesters::AuthToHost};
+use crate::{
+    context::LocationTag, location::coordinate_system::Coordinate, requesters::AuthToHost,
+};
 
 pub mod location_data;
 pub mod video_data;
 
+pub const DOMINANT_COLOR_AMOUNT: usize = 4;
 pub static TESTING_FILE_MANAGER: Mutex<TestingFileManger> =
     Mutex::const_new(TestingFileManger::new());
 
@@ -42,7 +45,8 @@ pub static AUTH_AGENT: LazyLock<Option<AuthToHost>> = LazyLock::new(|| {
 #[derive(Clone, Debug)]
 pub struct TestingImage {
     pub img_path: PathBuf,
-    pub categories: Vec<ContextCategory>,
+    pub categories: Vec<LocationTag>,
+    pub location: Option<Coordinate>,
 }
 
 pub struct TestingFileManger {
@@ -75,6 +79,23 @@ impl TestingFileManger {
             })
     }
 
+    pub fn find_by_name(&mut self, name: &str) -> Option<TestingImage> {
+        let imgs = self.all_images();
+        imgs.iter()
+            .find(|pred| {
+                let img_name = pred
+                    .img_path
+                    .file_name()
+                    .map_or_default(|os_str| {
+                        os_str
+                            .to_str()
+                            .unwrap_or_default()
+                    });
+                img_name == name
+            })
+            .cloned()
+    }
+
     pub fn test_out(&mut self, path: impl AsRef<Path>) -> PathBuf {
         let p = self.out_dir();
         let dir = p.join(path);
@@ -87,6 +108,17 @@ impl TestingFileManger {
         dir
     }
 
+    pub fn only_cord_images(&mut self) -> Vec<TestingImage> {
+        self.all_images()
+            .iter()
+            .filter(|pred| {
+                pred.location
+                    .is_some()
+            })
+            .cloned()
+            .collect()
+    }
+
     pub fn all_images(&mut self) -> Vec<TestingImage> {
         let image_dir = self
             .image_dir()
@@ -96,9 +128,9 @@ impl TestingFileManger {
             .all_images
             .get_or_insert_with(move || {
                 let folders = [
-                    (image_dir.join("outside"), ContextCategory::Outside),
-                    (image_dir.join("forest"), ContextCategory::Forest),
-                    (image_dir.join("inside"), ContextCategory::Inside),
+                    (image_dir.join("outside"), LocationTag::Outside),
+                    (image_dir.join("forest"), LocationTag::Forest),
+                    (image_dir.join("inside"), LocationTag::Inside),
                 ];
 
                 folders
@@ -120,11 +152,26 @@ impl TestingFileManger {
 
                                 is_file && valid_ext
                             })
-                            .map(|val| TestingImage {
-                                img_path: val.path(),
-                                categories: ctx_cat
-                                    .implied_additional_categories()
-                                    .to_vec(),
+                            .map(|val| {
+                                let json_path = val
+                                    .path()
+                                    .with_extension("json");
+
+                                let image_location: Option<Coordinate> = if json_path.is_file() {
+                                    File::open(&json_path)
+                                        .ok()
+                                        .and_then(|file| serde_json::from_reader(file).ok())
+                                } else {
+                                    None
+                                };
+
+                                TestingImage {
+                                    img_path: val.path(),
+                                    categories: ctx_cat
+                                        .implied_additional_categories()
+                                        .to_vec(),
+                                    location: image_location,
+                                }
                             })
                             .collect();
 
@@ -174,7 +221,7 @@ impl TestingFileManger {
     }
 }
 
-const AMOUNT_OF_IMAGES: usize = 11;
+const AMOUNT_OF_IMAGES: usize = 12;
 
 #[allow(clippy::significant_drop_tightening)]
 #[tokio::test]
@@ -201,11 +248,3 @@ async fn correct_amount_of_files() {
         "These files where found: {image_files:?}"
     );
 }
-
-// #[ctor(unsafe)]
-// fn init_tracing() {
-//     tracing_subscriber::fmt()
-//         .with_env_filter("debug")
-//         .with_test_writer()
-//         .init();
-// }

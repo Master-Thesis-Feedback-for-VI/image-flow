@@ -1,7 +1,7 @@
 use clap::Parser;
 use image_flow::{
     context::{
-        UniqueGeographicCategories,
+        UniqueLocationTags,
         image_based_context::{ImageRecognizer, ModelVariant::Medium},
     },
     location::{coordinate_system::Coordinate, tabular_gps::DataPointsGPS},
@@ -53,7 +53,7 @@ struct Args {
 
 #[derive(Serialize, Clone, Debug)]
 struct CategoryTime {
-    categories: UniqueGeographicCategories,
+    categories: UniqueLocationTags,
     time_diff: Duration,
     location: Coordinate,
 }

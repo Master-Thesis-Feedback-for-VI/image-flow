@@ -10,7 +10,7 @@ use std::{
 use tokio::time::Duration;
 
 use crate::{
-    context::ContextCategory,
+    context::LocationTag,
     error,
     location::coordinate_system::Coordinate,
     requesters::{AuthToHost, client::throttled_post},
@@ -244,7 +244,7 @@ fn urlencoding_encode(input: &str) -> String {
 pub async fn inside_building(
     coordinates: impl Into<Coordinate>,
     auth: Option<Arc<AuthToHost>>,
-) -> crate::Result<ContextCategory> {
+) -> crate::Result<LocationTag> {
     let Coordinate { lat, lon } = coordinates.into();
 
     let query = format!("[out:json];is_in({lat},{lon})->.a;wr(pivot.a)[building];out tags;");
@@ -255,9 +255,9 @@ pub async fn inside_building(
         .is_some_and(|val| val.is_empty());
 
     let ctx = if empty_building {
-        ContextCategory::Outside
+        LocationTag::Outside
     } else {
-        ContextCategory::Inside
+        LocationTag::Inside
     };
     Ok(ctx)
 }
