@@ -79,6 +79,23 @@ impl TestingFileManger {
             })
     }
 
+    pub fn find_by_name(&mut self, name: &str) -> Option<TestingImage> {
+        let imgs = self.all_images();
+        imgs.iter()
+            .find(|pred| {
+                let img_name = pred
+                    .img_path
+                    .file_name()
+                    .map_or_default(|os_str| {
+                        os_str
+                            .to_str()
+                            .unwrap_or_default()
+                    });
+                img_name == name
+            })
+            .cloned()
+    }
+
     pub fn test_out(&mut self, path: impl AsRef<Path>) -> PathBuf {
         let p = self.out_dir();
         let dir = p.join(path);
@@ -136,22 +153,17 @@ impl TestingFileManger {
                                 is_file && valid_ext
                             })
                             .map(|val| {
-                                let image_location: Option<Coordinate> = val
+                                let json_path = val
                                     .path()
-                                    .file_stem()
-                                    .and_then(|stem| {
-                                        let mut path_with_ext = stem.to_os_string();
-                                        path_with_ext.push(".json");
-                                        let path = Path::new(&path_with_ext);
+                                    .with_extension("json");
 
-                                        if path.is_file() {
-                                            File::open(path)
-                                                .ok()
-                                                .and_then(|file| serde_json::from_reader(file).ok())
-                                        } else {
-                                            None
-                                        }
-                                    });
+                                let image_location: Option<Coordinate> = if json_path.is_file() {
+                                    File::open(&json_path)
+                                        .ok()
+                                        .and_then(|file| serde_json::from_reader(file).ok())
+                                } else {
+                                    None
+                                };
 
                                 TestingImage {
                                     img_path: val.path(),
@@ -209,7 +221,7 @@ impl TestingFileManger {
     }
 }
 
-const AMOUNT_OF_IMAGES: usize = 11;
+const AMOUNT_OF_IMAGES: usize = 12;
 
 #[allow(clippy::significant_drop_tightening)]
 #[tokio::test]

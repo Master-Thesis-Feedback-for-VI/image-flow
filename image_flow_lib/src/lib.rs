@@ -16,9 +16,14 @@ pub mod requesters;
 #[cfg(feature = "video")]
 pub mod video_slicer;
 
+use tokio::task::JoinHandle;
+
 pub use crate::context::image_based_context::FramePath;
-use crate::context::image_based_context::evaluate_image_into_location_tags;
 pub use crate::error::{Error, Result};
+use crate::{
+    context::image_based_context::evaluate_image_into_location_tags,
+    image_processor::DominantColors,
+};
 use crate::{
     context::{
         image_based_context::ImageDetections,
@@ -183,23 +188,35 @@ async fn image_flow_evaluation_impl(
     image_recognizer: &ImageRecognizer,
     amount: usize,
 ) -> crate::Result<ImageFlowEvaluation> {
-    let img_path = img_path.as_ref();
+    let img_path = img_path
+        .as_ref()
+        .to_owned();
+    let location = location.into();
     if !img_path.exists() {
         let err_msg = format!("the file {} does not exist", img_path.display());
         return Err(crate::error::file_does_not_exist(err_msg));
     }
 
-    let detections_fut = recognize_objects_in_image_impl(&img_path, image_recognizer);
+    let detections_fut = recognize_objects_in_image_impl(img_path.clone(), image_recognizer);
 
-    let dominant_colors = dominant_colors(img_path, amount).await?;
-    let location_tags_fut = evaluate_image_and_location_as_location_tags(
-        location,
-        auth.map(Arc::new),
-        &dominant_colors,
-    );
+    let location_tags_dom_colors_fut: JoinHandle<
+        crate::Result<(UniqueLocationTags, DominantColors)>,
+    > = tokio::spawn(async move {
+        let dominant_colors = dominant_colors(img_path, amount).await?;
+        let location_tags = evaluate_image_and_location_as_location_tags(
+            location,
+            auth.map(Arc::new),
+            &dominant_colors,
+        )
+        .await;
 
-    let (image_detections, mut location_tags) = tokio::join!(detections_fut, location_tags_fut);
+        Ok((location_tags, dominant_colors))
+    });
+
+    let (image_detections, location_tags_dom_colors) =
+        tokio::join!(detections_fut, location_tags_dom_colors_fut);
     let image_detections = image_detections?;
+    let (mut location_tags, dominant_colors) = location_tags_dom_colors??;
 
     let additional_categories =
         evaluate_image_into_location_tags(&dominant_colors, &image_detections);
@@ -213,8 +230,115 @@ async fn image_flow_evaluation_impl(
 
 #[cfg(test)]
 mod test {
-    #[tokio::test]
-    async fn check_images_with_data() {
-        todo!()
+    use std::sync::Arc;
+
+    use crate::{
+        context::image_based_context::ImageRecognizer,
+        image_flow_evaluation, recognize_location_tags, recognize_objects_in_image,
+        tests::{AUTH_AGENT, DOMINANT_COLOR_AMOUNT, TESTING_FILE_MANAGER, TestingImage},
+    };
+
+    async fn fetch_img(name: &str) -> TestingImage {
+        TESTING_FILE_MANAGER
+            .lock()
+            .await
+            .find_by_name(name)
+            .unwrap()
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn image_flow_check() {
+        let amount = DOMINANT_COLOR_AMOUNT as u32;
+        let model = Arc::new(
+            ImageRecognizer::default()
+                .await
+                .unwrap(),
+        );
+        let auth = AUTH_AGENT.clone();
+
+        let mhh_img = fetch_img("MHH.png").await;
+        let location = mhh_img
+            .location
+            .unwrap();
+        let img_path = &mhh_img.img_path;
+
+        let evaluation = image_flow_evaluation(
+            location,
+            auth.clone(),
+            img_path
+                .to_str()
+                .unwrap(),
+            model.clone(),
+            amount,
+        )
+        .await
+        .unwrap();
+
+        insta::assert_debug_snapshot!(evaluation);
+
+        let erdbeer_img = fetch_img("Erdbeerhof.png").await;
+        let location = erdbeer_img
+            .location
+            .unwrap();
+        let img_path = erdbeer_img
+            .img_path
+            .to_str()
+            .unwrap();
+
+        let evaluation = image_flow_evaluation(location, auth, img_path, model, amount)
+            .await
+            .unwrap();
+
+        insta::assert_debug_snapshot!(evaluation);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn recognize_objects_in_image_test() {
+        let bushalte_img = fetch_img("bushalte.jpg").await;
+
+        let model = Arc::new(
+            ImageRecognizer::default()
+                .await
+                .unwrap(),
+        );
+        let img_path = &bushalte_img.img_path;
+
+        let evaluation = recognize_objects_in_image(
+            img_path
+                .to_str()
+                .unwrap(),
+            model,
+        )
+        .await
+        .unwrap();
+
+        insta::assert_debug_snapshot!(evaluation);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn recognize_location_tags_test() {
+        let mhh_img = fetch_img("MHH.png").await;
+        let location = mhh_img
+            .location
+            .unwrap();
+        let auth = AUTH_AGENT.clone();
+        let img_path = mhh_img
+            .img_path
+            .to_str()
+            .unwrap();
+
+        let evaluation =
+            recognize_location_tags(location, auth, img_path, DOMINANT_COLOR_AMOUNT as u32)
+                .await
+                .unwrap();
+
+        insta::assert_debug_snapshot!(evaluation, @"
+        UniqueLocationTags {
+            categories: {
+                Inside,
+            },
+            is_inside: true,
+        }
+        ");
     }
 }

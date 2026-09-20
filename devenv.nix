@@ -16,6 +16,8 @@
     git
     git-lfs
     cargo-udeps
+    cargo-insta
+    imagemagick
   ];
 
   languages = {

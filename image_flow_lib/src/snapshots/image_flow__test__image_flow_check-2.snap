@@ -1,0 +1,47 @@
+---
+source: image_flow_lib/src/lib.rs
+expression: evaluation
+---
+ImageFlowEvaluation {
+    location_tags: UniqueLocationTags {
+        categories: {
+            Forest,
+            Outside,
+        },
+        is_inside: false,
+    },
+    image_detections: ImageDetections {
+        detections: [
+            Detection {
+                confidence: 0.77732974,
+                name: Person,
+                xyxy: BoundingBox {
+                    x1: 1623.8564,
+                    x2: 2970.4883,
+                    y1: 1026.5403,
+                    y2: 2950.2275,
+                },
+            },
+            Detection {
+                confidence: 0.7729992,
+                name: Person,
+                xyxy: BoundingBox {
+                    x1: 1984.5438,
+                    x2: 2849.7385,
+                    y1: 1090.379,
+                    y2: 2678.3408,
+                },
+            },
+            Detection {
+                confidence: 0.56589997,
+                name: Person,
+                xyxy: BoundingBox {
+                    x1: 1200.4009,
+                    x2: 2961.0977,
+                    y1: 999.4814,
+                    y2: 2967.9636,
+                },
+            },
+        ],
+    },
+}

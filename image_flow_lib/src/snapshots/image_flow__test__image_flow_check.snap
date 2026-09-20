@@ -1,0 +1,86 @@
+---
+source: image_flow_lib/src/lib.rs
+expression: evaluation
+---
+ImageFlowEvaluation {
+    location_tags: UniqueLocationTags {
+        categories: {
+            Inside,
+        },
+        is_inside: true,
+    },
+    image_detections: ImageDetections {
+        detections: [
+            Detection {
+                confidence: 0.9199533,
+                name: Chair,
+                xyxy: BoundingBox {
+                    x1: 297.8625,
+                    x2: 524.3075,
+                    y1: 117.06879,
+                    y2: 356.12137,
+                },
+            },
+            Detection {
+                confidence: 0.8958661,
+                name: Chair,
+                xyxy: BoundingBox {
+                    x1: 388.08887,
+                    x2: 516.7008,
+                    y1: 82.13153,
+                    y2: 221.9996,
+                },
+            },
+            Detection {
+                confidence: 0.88760805,
+                name: DiningTable,
+                xyxy: BoundingBox {
+                    x1: 77.29437,
+                    x2: 466.53394,
+                    y1: 79.54974,
+                    y2: 354.46237,
+                },
+            },
+            Detection {
+                confidence: 0.753343,
+                name: Chair,
+                xyxy: BoundingBox {
+                    x1: 101.41127,
+                    x2: 296.14734,
+                    y1: 79.50333,
+                    y2: 318.48083,
+                },
+            },
+            Detection {
+                confidence: 0.6317995,
+                name: Chair,
+                xyxy: BoundingBox {
+                    x1: 229.3952,
+                    x2: 288.7644,
+                    y1: 60.654892,
+                    y2: 108.53516,
+                },
+            },
+            Detection {
+                confidence: 0.33652416,
+                name: Laptop,
+                xyxy: BoundingBox {
+                    x1: 0.19838333,
+                    x2: 61.976906,
+                    y1: 263.78076,
+                    y2: 326.3703,
+                },
+            },
+            Detection {
+                confidence: 0.30469653,
+                name: DiningTable,
+                xyxy: BoundingBox {
+                    x1: 0.40273285,
+                    x2: 160.2862,
+                    y1: 264.32138,
+                    y2: 356.54828,
+                },
+            },
+        ],
+    },
+}

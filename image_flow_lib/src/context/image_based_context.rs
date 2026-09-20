@@ -350,6 +350,11 @@ enum DetectionType {
     Bench,
     Chair,
     DiningTable,
+
+    Cup,
+    Handbag,
+    Laptop,
+
     Unknown(String),
 }
 
@@ -364,6 +369,9 @@ impl DetectionType {
             "bench" => Self::Bench,
             "chair" => Self::Chair,
             "dining table" => Self::DiningTable,
+            "cup" => Self::Cup,
+            "handbag" => Self::Handbag,
+            "laptop" => Self::Laptop,
             _ => Self::Unknown(name),
         }
     }
