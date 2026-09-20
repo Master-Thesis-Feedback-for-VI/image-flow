@@ -5,17 +5,17 @@ expression: evaluation
 ImageDetections {
     detections: [
         Detection {
-            confidence: 0.9017528,
+            confidence: 0.9017526,
             name: Person,
             xyxy: BoundingBox {
                 x1: 1760.1779,
-                x2: 1919.0187,
+                x2: 1919.0189,
                 y1: 657.63855,
                 y2: 1293.4153,
             },
         },
         Detection {
-            confidence: 0.86315393,
+            confidence: 0.86315465,
             name: Person,
             xyxy: BoundingBox {
                 x1: 1094.5164,
@@ -25,7 +25,7 @@ ImageDetections {
             },
         },
         Detection {
-            confidence: 0.8403071,
+            confidence: 0.8403075,
             name: Person,
             xyxy: BoundingBox {
                 x1: 1357.2445,
@@ -35,7 +35,7 @@ ImageDetections {
             },
         },
         Detection {
-            confidence: 0.82735336,
+            confidence: 0.82735384,
             name: Person,
             xyxy: BoundingBox {
                 x1: 351.75845,
@@ -45,7 +45,7 @@ ImageDetections {
             },
         },
         Detection {
-            confidence: 0.80360943,
+            confidence: 0.80360985,
             name: Person,
             xyxy: BoundingBox {
                 x1: 930.77124,
@@ -55,27 +55,27 @@ ImageDetections {
             },
         },
         Detection {
-            confidence: 0.719434,
+            confidence: 0.7194334,
             name: Person,
             xyxy: BoundingBox {
                 x1: 283.01276,
-                x2: 363.47598,
-                y1: 649.2136,
+                x2: 363.47595,
+                y1: 649.2137,
                 y2: 879.6385,
             },
         },
         Detection {
-            confidence: 0.7163019,
+            confidence: 0.71630156,
             name: Person,
             xyxy: BoundingBox {
                 x1: 540.5739,
-                x2: 647.98,
+                x2: 647.98004,
                 y1: 674.61475,
                 y2: 981.29004,
             },
         },
         Detection {
-            confidence: 0.6752905,
+            confidence: 0.67529094,
             name: Handbag,
             xyxy: BoundingBox {
                 x1: 371.69266,
@@ -85,17 +85,17 @@ ImageDetections {
             },
         },
         Detection {
-            confidence: 0.65875286,
+            confidence: 0.6587533,
             name: Person,
             xyxy: BoundingBox {
-                x1: 174.34041,
-                x2: 258.5575,
+                x1: 174.3404,
+                x2: 258.55756,
                 y1: 620.52814,
                 y2: 827.2588,
             },
         },
         Detection {
-            confidence: 0.6325626,
+            confidence: 0.6325617,
             name: Person,
             xyxy: BoundingBox {
                 x1: 1209.6613,
@@ -105,7 +105,7 @@ ImageDetections {
             },
         },
         Detection {
-            confidence: 0.6186274,
+            confidence: 0.6186279,
             name: Unknown(
                 "suitcase",
             ),
@@ -117,7 +117,7 @@ ImageDetections {
             },
         },
         Detection {
-            confidence: 0.5736019,
+            confidence: 0.5736024,
             name: Unknown(
                 "suitcase",
             ),
@@ -129,7 +129,7 @@ ImageDetections {
             },
         },
         Detection {
-            confidence: 0.5694559,
+            confidence: 0.5694557,
             name: Unknown(
                 "backpack",
             ),
@@ -141,47 +141,47 @@ ImageDetections {
             },
         },
         Detection {
-            confidence: 0.52200466,
+            confidence: 0.52200395,
             name: Person,
             xyxy: BoundingBox {
-                x1: 120.50865,
-                x2: 178.83595,
+                x1: 120.50867,
+                x2: 178.83592,
                 y1: 612.8692,
                 y2: 808.8241,
             },
         },
         Detection {
-            confidence: 0.5070007,
+            confidence: 0.5069988,
             name: Person,
             xyxy: BoundingBox {
-                x1: 479.78357,
+                x1: 479.7835,
                 x2: 562.13403,
-                y1: 640.48083,
+                y1: 640.4808,
                 y2: 856.9371,
             },
         },
         Detection {
-            confidence: 0.48645684,
+            confidence: 0.48645708,
             name: Handbag,
             xyxy: BoundingBox {
-                x1: 856.7117,
+                x1: 856.71155,
                 x2: 920.7067,
                 y1: 799.71423,
                 y2: 864.05804,
             },
         },
         Detection {
-            confidence: 0.47570047,
+            confidence: 0.47570023,
             name: Handbag,
             xyxy: BoundingBox {
                 x1: 1264.6545,
                 x2: 1368.1173,
                 y1: 1026.1154,
-                y2: 1158.8763,
+                y2: 1158.8765,
             },
         },
         Detection {
-            confidence: 0.4241618,
+            confidence: 0.4241611,
             name: Person,
             xyxy: BoundingBox {
                 x1: 435.12964,
@@ -191,7 +191,7 @@ ImageDetections {
             },
         },
         Detection {
-            confidence: 0.36785913,
+            confidence: 0.36785868,
             name: Handbag,
             xyxy: BoundingBox {
                 x1: 464.88367,
@@ -201,7 +201,7 @@ ImageDetections {
             },
         },
         Detection {
-            confidence: 0.343423,
+            confidence: 0.34342325,
             name: Handbag,
             xyxy: BoundingBox {
                 x1: 512.14716,
@@ -211,17 +211,17 @@ ImageDetections {
             },
         },
         Detection {
-            confidence: 0.3415585,
+            confidence: 0.34155828,
             name: Person,
             xyxy: BoundingBox {
-                x1: 27.011301,
+                x1: 27.011307,
                 x2: 79.30097,
                 y1: 626.4835,
                 y2: 800.3766,
             },
         },
         Detection {
-            confidence: 0.33753228,
+            confidence: 0.33753252,
             name: Person,
             xyxy: BoundingBox {
                 x1: 242.87276,
@@ -231,7 +231,7 @@ ImageDetections {
             },
         },
         Detection {
-            confidence: 0.32047898,
+            confidence: 0.32047856,
             name: Handbag,
             xyxy: BoundingBox {
                 x1: 1326.3424,
@@ -241,7 +241,7 @@ ImageDetections {
             },
         },
         Detection {
-            confidence: 0.2989189,
+            confidence: 0.2989195,
             name: Handbag,
             xyxy: BoundingBox {
                 x1: 942.5622,
@@ -251,7 +251,7 @@ ImageDetections {
             },
         },
         Detection {
-            confidence: 0.2943142,
+            confidence: 0.29431462,
             name: Cup,
             xyxy: BoundingBox {
                 x1: 1097.9143,
@@ -261,7 +261,7 @@ ImageDetections {
             },
         },
         Detection {
-            confidence: 0.2877469,
+            confidence: 0.2877479,
             name: Person,
             xyxy: BoundingBox {
                 x1: 861.16534,
@@ -271,7 +271,7 @@ ImageDetections {
             },
         },
         Detection {
-            confidence: 0.2767184,
+            confidence: 0.27671802,
             name: Handbag,
             xyxy: BoundingBox {
                 x1: 295.734,
@@ -281,7 +281,7 @@ ImageDetections {
             },
         },
         Detection {
-            confidence: 0.26972026,
+            confidence: 0.26971936,
             name: Person,
             xyxy: BoundingBox {
                 x1: 688.47675,
@@ -291,7 +291,7 @@ ImageDetections {
             },
         },
         Detection {
-            confidence: 0.252532,
+            confidence: 0.25253218,
             name: Person,
             xyxy: BoundingBox {
                 x1: 1282.0416,

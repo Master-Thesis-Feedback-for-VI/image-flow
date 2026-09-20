@@ -19,5 +19,4 @@ devenv.local.yaml
 .pre-commit-config.yaml
 
 yolo26*
-*-snap
 .env*
