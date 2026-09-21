@@ -341,19 +341,19 @@ impl Drop for FramePath {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, uniffi::Enum)]
-enum DetectionType {
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, uniffi::Enum, Eq, PartialOrd, Ord)]
+pub enum DetectionType {
+    Bench,
+    Bicycle,
+    Car,
+    Chair,
+    Cup,
+    DiningTable,
+    Handbag,
+
+    Laptop,
     Person,
     TrafficLight,
-    Car,
-    Bicycle,
-    Bench,
-    Chair,
-    DiningTable,
-
-    Cup,
-    Handbag,
-    Laptop,
 
     Unknown(String),
 }
@@ -388,13 +388,13 @@ pub struct BoundingBox {
 #[derive(Debug, Clone, Serialize, Deserialize, uniffi::Record)]
 pub struct Detection {
     confidence: f32,
-    name: DetectionType,
+    pub(crate) name: DetectionType,
     xyxy: BoundingBox,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, uniffi::Record)]
 pub struct ImageDetections {
-    detections: Vec<Detection>,
+    pub(crate) detections: Vec<Detection>,
 }
 
 impl ImageDetections {

@@ -175,7 +175,7 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+mod test {
     use chrono::{Duration, TimeDelta, TimeZone, Utc};
 
     use crate::{

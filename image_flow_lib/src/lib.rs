@@ -16,6 +16,7 @@ pub mod requesters;
 #[cfg(feature = "video")]
 pub mod video_slicer;
 
+use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
 
 pub use crate::context::image_based_context::FramePath;
@@ -50,10 +51,25 @@ use std::fmt::Display;
 use std::path::Path;
 use std::{result::Result as DefaultResult, sync::Arc};
 
-#[derive(Debug, uniffi::Record)]
+#[derive(Debug, uniffi::Object, Deserialize, Serialize)]
 pub struct ImageFlowEvaluation {
     location_tags: UniqueLocationTags,
     image_detections: ImageDetections,
+}
+
+/// # Errors
+/// TODO
+#[uniffi::export]
+pub async fn image_flow_evaluation_read_from_json(
+    path: &str,
+) -> DefaultResult<ImageFlowEvaluation, ImageFlowError> {
+    let json_str = tokio::fs::read_to_string(path)
+        .await
+        .map_err(crate::error::serialization)?;
+    let data: ImageFlowEvaluation =
+        serde_json::from_str(&json_str).map_err(crate::error::serialization)?;
+
+    Ok(data)
 }
 
 /// # Errors
@@ -229,6 +245,49 @@ async fn image_flow_evaluation_impl(
     })
 }
 
+#[uniffi::export]
+impl ImageFlowEvaluation {
+    #[uniffi::constructor]
+    #[must_use]
+    pub const fn new(location_tags: UniqueLocationTags, image_detections: ImageDetections) -> Self {
+        Self {
+            location_tags,
+            image_detections,
+        }
+    }
+
+    /// # Errors
+    /// TODO
+    pub async fn save_as_json(&self, path: &str) -> DefaultResult<(), ImageFlowError> {
+        let json = serde_json::to_string_pretty(self).map_err(crate::error::serialization)?;
+
+        tokio::fs::write(path, json)
+            .await
+            .map_err(crate::error::serialization)?;
+
+        Ok(())
+    }
+}
+
+impl Display for ImageFlowEvaluation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let location_tags = &self.location_tags;
+        let mut detections = self
+            .image_detections
+            .clone()
+            .detections;
+        detections.sort_by(|a, b| {
+            a.name
+                .cmp(&b.name)
+        });
+
+        write!(
+            f,
+            "ImageFlowEvaluations:\n\tlocations_tags\t{location_tags}\n\tdetections\t{detections:#?}"
+        )
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::sync::Arc;
@@ -282,7 +341,7 @@ mod test {
             .await
             .unwrap();
 
-        insta::assert_debug_snapshot!(evaluation);
+        insta::assert_snapshot!(evaluation);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

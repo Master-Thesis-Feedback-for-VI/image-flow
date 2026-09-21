@@ -208,7 +208,7 @@ impl LocationTag {
 }
 
 #[cfg(test)]
-mod tests {
+mod test {
     use std::{iter, sync::Arc};
 
     use crate::{

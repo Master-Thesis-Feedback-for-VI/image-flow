@@ -1,5 +1,6 @@
 use std::{
     collections::{HashSet, hash_set},
+    fmt::Display,
     mem,
     sync::LazyLock,
 };
@@ -132,6 +133,22 @@ impl UniqueLocationTags {
             .collect();
 
         Self { categories, ..self }
+    }
+}
+
+impl Display for UniqueLocationTags {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let categories = self
+            .categories
+            .clone()
+            .into_iter()
+            .collect::<Vec<LocationTag>>();
+
+        let inside = self.is_inside;
+        write!(
+            f,
+            "UniqueLocationTags:\n\tis_inside:\t{inside}\n\t{categories:#?}"
+        )
     }
 }
 

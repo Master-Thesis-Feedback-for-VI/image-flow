@@ -318,7 +318,7 @@ impl VideoMetadata {
 }
 
 #[cfg(test)]
-mod tests {
+mod test {
     use chrono::Duration;
     use futures::StreamExt;
     use std::path::Path;
