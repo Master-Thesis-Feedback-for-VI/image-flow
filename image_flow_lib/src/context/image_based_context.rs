@@ -350,10 +350,11 @@ pub enum DetectionType {
     Cup,
     DiningTable,
     Handbag,
-
     Laptop,
     Person,
     TrafficLight,
+    Tv,
+    Keyboard,
 
     Unknown(String),
 }
@@ -372,6 +373,8 @@ impl DetectionType {
             "cup" => Self::Cup,
             "handbag" => Self::Handbag,
             "laptop" => Self::Laptop,
+            "tv" => Self::Tv,
+            "keyboard" => Self::Keyboard,
             _ => Self::Unknown(name),
         }
     }

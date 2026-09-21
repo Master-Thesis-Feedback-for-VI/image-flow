@@ -1,14 +1,12 @@
 use clap::Parser;
 use image_flow::{
-    context::{
-        UniqueLocationTags,
-        image_based_context::{ImageRecognizer, ModelVariant::Medium},
-    },
-    location::{coordinate_system::Coordinate, tabular_gps::DataPointsGPS},
+    ImageFlowEvaluationForRecording,
+    context::image_based_context::{ImageRecognizer, ModelVariant::Medium},
+    enable_tracing, image_flow_evaluation_impl,
+    location::tabular_gps::DataPointsGPS,
     requesters::AuthToHost,
     video_slicer::ImageGPSZip,
 };
-use serde::Serialize;
 use std::{
     fs::File,
     io::BufWriter,
@@ -18,7 +16,6 @@ use std::{
 };
 use tempfile::tempdir;
 use tracing::info;
-use tracing_subscriber::EnvFilter;
 
 pub static AUTH_AGENT: LazyLock<Option<AuthToHost>> = LazyLock::new(|| {
     let user_name = option_env!("USER_AGENT_NAME");
@@ -51,22 +48,9 @@ struct Args {
     serialized_output: PathBuf,
 }
 
-#[derive(Serialize, Clone, Debug)]
-struct CategoryTime {
-    categories: UniqueLocationTags,
-    time_diff: Duration,
-    location: Coordinate,
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::new("error"))
-        .init();
-
-    let auth_agent = AUTH_AGENT
-        .clone()
-        .map(Arc::new);
+    let _ = enable_tracing(Some(image_flow::FilterLevel::Error));
 
     let args: Args = Args::parse();
     if !args
@@ -108,10 +92,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
     println!("... finished now proceeding to data tagging");
 
-    let mut unique_geo_cat_collection = Vec::new();
+    let mut unique_geo_cat_collection: Vec<ImageFlowEvaluationForRecording> = Vec::new();
     for (location, frame) in zipped.iter() {
-        let evaluation =
-            image_flow::evaluate_context_impl(*location, frame, &model, auth_agent.clone()).await;
+        let auth = AUTH_AGENT.clone();
+        let evaluation = image_flow_evaluation_impl(*location, auth, frame, &model, 4).await;
 
         match evaluation {
             Ok(eva) => {
@@ -120,13 +104,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .to_std()
                     .expect("It failed?");
                 info!("it was evaluated to: {eva:#?}");
-                let combined = CategoryTime {
-                    categories: eva,
-                    time_diff,
-                    location: *location,
-                };
-                println!("This data was captured:\n{combined:#?}");
-                unique_geo_cat_collection.push(combined);
+                let evaluated =
+                    ImageFlowEvaluationForRecording::new(Arc::new(eva), time_diff, *location);
+
+                println!("This data was captured:\n{evaluated:#?}");
+                unique_geo_cat_collection.push(evaluated);
             }
             Err(e) => {
                 tracing::error!("{e}");

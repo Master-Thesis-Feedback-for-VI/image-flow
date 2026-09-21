@@ -29,6 +29,7 @@ pub enum LocationTag {
     Street,
     Pedestrian,
     Intersection,
+    Parking,
 
     Elevator,
 }
@@ -44,6 +45,7 @@ impl LocationTag {
             Self::Pedestrian => &[Self::Outside, Self::Pedestrian],
             Self::Intersection => &[Self::Outside, Self::Intersection],
             Self::Elevator => &[Self::Elevator],
+            Self::Parking => &[Self::Parking, Self::Outside, Self::Street],
         }
     }
 }

@@ -6,8 +6,8 @@ ImageFlowEvaluations:
 	locations_tags	UniqueLocationTags:
 	is_inside:	false
 	[
-    Forest,
     Outside,
+    Forest,
 ]
 	detections	[
     Detection {

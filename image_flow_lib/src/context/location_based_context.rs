@@ -91,7 +91,7 @@ impl LocationTag {
             "elevator" => {
                 categories.insert(Self::Elevator);
             }
-            "apartments" | "library" | "cafe" => {
+            "apartments" | "library" | "cafe" | "pub" => {
                 categories.insert(Self::Inside);
             }
             "track" => {
@@ -104,6 +104,9 @@ impl LocationTag {
             }
             "bicycle_parking" | "house" => {
                 categories.insert(Self::Outside);
+            }
+            "parking" => {
+                categories.insert(Self::Parking);
             }
             "motorway" | "trunk" | "primary" | "secondary" | "tertiary" | "unclassified"
             | "residential" | "living_street" => {

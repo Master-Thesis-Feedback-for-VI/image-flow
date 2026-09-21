@@ -49,12 +49,20 @@ use crate::{
 };
 use std::fmt::Display;
 use std::path::Path;
+use std::time::Duration;
 use std::{result::Result as DefaultResult, sync::Arc};
 
-#[derive(Debug, uniffi::Object, Deserialize, Serialize)]
+#[derive(Debug, Clone, uniffi::Object, Deserialize, Serialize)]
 pub struct ImageFlowEvaluation {
     location_tags: UniqueLocationTags,
     image_detections: ImageDetections,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, uniffi::Object)]
+pub struct ImageFlowEvaluationForRecording {
+    evaluations: ImageFlowEvaluation,
+    time_diff: Duration,
+    location: Coordinate,
 }
 
 /// # Errors
@@ -176,7 +184,9 @@ pub async fn recognize_objects_in_image_impl(
         .await
 }
 
-async fn recognize_location_tags_impl(
+/// # Errors
+/// TODO
+pub async fn recognize_location_tags_impl(
     location: impl Into<Coordinate>,
     auth: Option<AuthToHost>,
     img_path: impl AsRef<Path>,
@@ -197,8 +207,9 @@ async fn recognize_location_tags_impl(
     Ok(evaluation)
 }
 
-// TODO improve performance by parallalizing here
-async fn image_flow_evaluation_impl(
+/// # Errors
+/// TODO
+pub async fn image_flow_evaluation_impl(
     location: impl Into<Coordinate>,
     auth: Option<AuthToHost>,
     img_path: impl AsRef<Path>,
@@ -266,6 +277,24 @@ impl ImageFlowEvaluation {
             .map_err(crate::error::serialization)?;
 
         Ok(())
+    }
+}
+
+#[uniffi::export]
+impl ImageFlowEvaluationForRecording {
+    #[uniffi::constructor]
+    #[must_use]
+    pub fn new(
+        evaluations: Arc<ImageFlowEvaluation>,
+        time_diff: Duration,
+        location: Coordinate,
+    ) -> Self {
+        let evaluations = Arc::unwrap_or_clone(evaluations);
+        Self {
+            evaluations,
+            time_diff,
+            location,
+        }
     }
 }
 
