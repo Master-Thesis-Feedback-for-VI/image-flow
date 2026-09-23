@@ -30,7 +30,7 @@ required-features = ["video", "cli"]
 [features]
 default = ["video"]
 video = ["dep:ffmpeg-next"]
-cli = ["dep:clap"]
+cli = ["dep:clap", "dep:zip", "dep:walkdir"]
 
 [dependencies]
 kmeans_colors = { version = "0.7", default-features = false, features = [
@@ -57,6 +57,8 @@ uniffi.workspace = true
 tokio-stream = "0.1"
 futures = "0.3"
 futures-util = "0.3"
+zip = { version = "8", optional = true }
+walkdir = { version = "2.5", optional = true }
 
 [dev-dependencies]
 insta = "1.48"

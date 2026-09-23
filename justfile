@@ -122,7 +122,7 @@ pipeline_small:
         "sample_data/recording-2026-08-12-13-24-46/6FC95631-8DE8-43F1-AEB4-DC4B6AF6CAC5.mov" \
         "sample_data/recording-2026-08-12-13-24-46/gps_timestamps.csv" \
         '{{tmp_output / "recording-2026-08-12-13-24-46"}}' \
-        '{{"." / tmp_output / "small" / "content.json"}}'
+        '{{"." / tmp_output / "small"}}'
 
 [group('scripts')]
 pipeline_large:
@@ -132,7 +132,7 @@ pipeline_large:
         "sample_data/recording-2026-08-12-13-41-36/E510E1EE-D294-4EAF-8652-B95B9D72AC21.mov" \
         "sample_data/recording-2026-08-12-13-41-36/gps_timestamps.csv" \
         '{{tmp_output / "recording-2026-08-12-13-41-36"}}' \
-        '{{"." / tmp_output / "large" / "content.json"}}'
+        '{{"." / tmp_output / "large"}}'
 
 [group('scripts')]
 pipeline_conti_alehop:
@@ -142,4 +142,4 @@ pipeline_conti_alehop:
         "sample_data/recording-2026-09-21-13-56-50/5A4E31ED-E618-4923-AAF7-BC6ED3E08AC7.mov" \
         "sample_data/recording-2026-09-21-13-56-50/gps_timestamps.csv" \
         '{{tmp_output / "recording-2026-09-21-13-56-50"}}' \
-        '{{"." / tmp_output / "conti_alehop" / "content.json"}}'
+        '{{"." / tmp_output / "conti_alehop"}}'

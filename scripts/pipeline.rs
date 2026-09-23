@@ -7,29 +7,38 @@ use image_flow::{
     requesters::AuthToHost,
     video_slicer::ImageGPSZip,
 };
+use std::io::Read;
+use std::io::Write;
 use std::{
-    fs::File,
+    fs::{self, File},
     io::BufWriter,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, LazyLock},
     time::Duration,
 };
 use tempfile::tempdir;
 use tracing::info;
+use walkdir::WalkDir;
+use zip::CompressionMethod;
+use zip::ZipWriter;
+use zip::write::SimpleFileOptions;
 
 pub static AUTH_AGENT: LazyLock<Option<AuthToHost>> = LazyLock::new(|| {
     let user_name = option_env!("USER_AGENT_NAME");
     let passwd = option_env!("PASSWORD");
-    let url = option_env!("OVERPASS_URL");
+    let overpass_url = option_env!("OVERPASS_URL");
+    let nominatim_url = option_env!("NOMINATIM_URL");
 
     if let Some(passwd) = passwd
         && let Some(user) = user_name
-        && let Some(url) = url
+        && let Some(overpass_url) = overpass_url
+        && let Some(nominatim_url) = nominatim_url
     {
         Some(AuthToHost {
-            overpass_url: url.to_string(),
+            overpass_url: overpass_url.to_string(),
             user: user.to_string(),
             passwd: passwd.to_string(),
+            nominatim_url: nominatim_url.to_string(),
         })
     } else {
         None
@@ -84,7 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Processing Video...");
     let zipped = ImageGPSZip::from_video_and_gps(
-        args.vid,
+        &args.vid,
         &datapoints,
         &dir_path,
         chrono::Duration::seconds(1),
@@ -116,9 +125,68 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let file = File::create(&args.serialized_output)?;
+    let content_file = args
+        .serialized_output
+        .join("content.json");
+    let file = File::create(content_file)?;
     let write = BufWriter::new(file);
     serde_json::to_writer_pretty(write, &unique_geo_cat_collection)?;
 
+    let movie_name = args
+        .serialized_output
+        .join("recording.mov");
+    fs::copy(&args.vid, movie_name)?;
+
+    let dst_file = args
+        .serialized_output
+        .file_name()
+        .and_then(|s| s.to_str())
+        .expect("this must work");
+    zip_folder(
+        &args.serialized_output,
+        args.serialized_output
+            .join("..")
+            .join(format!("{dst_file}.zip")),
+    )
+    .expect("Could not zip folder");
+
+    Ok(())
+}
+
+fn zip_folder(
+    src_path: impl AsRef<Path>,
+    dst_file: impl AsRef<Path>,
+) -> zip::result::ZipResult<()> {
+    let output = File::create(dst_file)?;
+    let mut zip = ZipWriter::new(output);
+    let options = SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Deflated)
+        .compression_level(Some(9))
+        .unix_permissions(0o755);
+
+    let mut buffer = Vec::new();
+    for entry in WalkDir::new(&src_path) {
+        let entry = entry.map_err(std::io::Error::from)?;
+        let path = entry.path();
+        let name = path
+            .strip_prefix(&src_path)
+            .expect("this should not fail");
+
+        if path.is_file() {
+            zip.start_file(name.to_string_lossy(), options)?;
+            let mut f = File::open(path)?;
+            f.read_to_end(&mut buffer)?;
+            zip.write_all(&buffer)?;
+            buffer.clear();
+        } else if !name
+            .as_os_str()
+            .is_empty()
+        {
+            // Preserve empty directories.
+            zip.add_directory(name.to_string_lossy(), options)?;
+        }
+    }
+
+    zip.finish()?;
     Ok(())
 }
