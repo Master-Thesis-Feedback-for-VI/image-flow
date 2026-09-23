@@ -70,14 +70,17 @@ pub struct ImageFlowEvaluationForRecording {
 #[uniffi::export]
 pub async fn image_flow_evaluation_read_from_json(
     path: &str,
-) -> DefaultResult<ImageFlowEvaluation, ImageFlowError> {
+) -> DefaultResult<Vec<Arc<ImageFlowEvaluationForRecording>>, ImageFlowError> {
     let json_str = tokio::fs::read_to_string(path)
         .await
         .map_err(crate::error::serialization)?;
-    let data: ImageFlowEvaluation =
+    let data: Vec<ImageFlowEvaluationForRecording> =
         serde_json::from_str(&json_str).map_err(crate::error::serialization)?;
 
-    Ok(data)
+    Ok(data
+        .into_iter()
+        .map(Arc::new)
+        .collect())
 }
 
 /// # Errors
