@@ -22,15 +22,13 @@ static INSIDE_CATEGORIES: LazyLock<HashSet<LocationTag>> =
 )]
 pub enum LocationTag {
     Forest,
-
     Outside,
     Inside,
-
     Street,
     Pedestrian,
     Intersection,
     Parking,
-
+    Railway,
     Elevator,
 }
 
@@ -46,6 +44,7 @@ impl LocationTag {
             Self::Intersection => &[Self::Outside, Self::Intersection],
             Self::Elevator => &[Self::Elevator],
             Self::Parking => &[Self::Parking, Self::Outside, Self::Street],
+            Self::Railway => &[Self::Railway],
         }
     }
 }

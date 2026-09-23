@@ -26,16 +26,19 @@ const TEST_REMOVE_FILES_AFTER_RERUN: bool = match option_env!("TEST_REMOVE_FILES
 pub static AUTH_AGENT: LazyLock<Option<AuthToHost>> = LazyLock::new(|| {
     let user_name = option_env!("USER_AGENT_NAME");
     let passwd = option_env!("PASSWORD");
-    let url = option_env!("OVERPASS_URL");
+    let overpass_url = option_env!("OVERPASS_URL");
+    let nominatim_url = option_env!("NOMINATIM_URL");
 
     if let Some(passwd) = passwd
         && let Some(user) = user_name
-        && let Some(url) = url
+        && let Some(overpass_url) = overpass_url
+        && let Some(nominatim_url) = nominatim_url
     {
         Some(AuthToHost {
-            url: url.to_string(),
+            overpass_url: overpass_url.to_string(),
             user: user.to_string(),
             passwd: passwd.to_string(),
+            nominatim_url: nominatim_url.to_string(),
         })
     } else {
         None

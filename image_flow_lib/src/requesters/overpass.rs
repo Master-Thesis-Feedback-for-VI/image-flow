@@ -47,7 +47,7 @@ pub async fn fetch_raw_overpass_data(
     let auth_url = auth
         .as_ref()
         .map(|auth| {
-            auth.url
+            auth.overpass_url
                 .clone()
         });
 

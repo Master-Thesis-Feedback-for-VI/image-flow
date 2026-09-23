@@ -51,9 +51,12 @@ pub async fn evaluate_location_as_loaction_tags(
 ) -> UniqueLocationTags {
     let coordinates: Coordinate = pos.into();
 
-    let overpass_fut = LocationTag::extract_categories_from_overpass(coordinates, auth);
+    let overpass_auth = auth
+        .as_ref()
+        .map(Arc::clone);
+    let overpass_fut = LocationTag::extract_categories_from_overpass(coordinates, overpass_auth);
     let nominatim_fut = async {
-        LocationTag::extract_categories_from_nominatim(coordinates)
+        LocationTag::extract_categories_from_nominatim(coordinates, auth)
             .await
             .unwrap_or_else(|e| {
                 tracing::error!("failed to fetch from nominatim: {e:#?}");
@@ -75,13 +78,14 @@ impl LocationTag {
     ))]
     async fn extract_categories_from_nominatim<T: Into<Coordinate>>(
         coordinates: T,
+        auth: Option<Arc<AuthToHost>>,
     ) -> crate::Result<UniqueLocationTags> {
         let coordinates = coordinates.into();
 
         let span = Span::current();
         span.record("location", tracing::field::debug(&coordinates));
 
-        let loc_data = NominatimLocationData::from_cords(coordinates).await?;
+        let loc_data = NominatimLocationData::from_cords(coordinates, auth).await?;
         let mut categories = UniqueLocationTags::new();
 
         let location_type = loc_data
@@ -91,7 +95,7 @@ impl LocationTag {
             "elevator" => {
                 categories.insert(Self::Elevator);
             }
-            "apartments" | "library" | "cafe" | "pub" => {
+            "apartments" | "library" | "cafe" | "pub" | "house" | "university" => {
                 categories.insert(Self::Inside);
             }
             "track" => {
@@ -102,7 +106,7 @@ impl LocationTag {
                 categories.insert(Self::Outside);
                 categories.insert(Self::Pedestrian);
             }
-            "bicycle_parking" | "house" => {
+            "bicycle_parking" | "platform" => {
                 categories.insert(Self::Outside);
             }
             "parking" => {
@@ -148,6 +152,9 @@ impl LocationTag {
             }
             "amenity" => {
                 categories.insert(Self::Outside);
+            }
+            "railway" => {
+                categories.insert(Self::Railway);
             }
             "place" => {}
             _ => {
@@ -212,7 +219,7 @@ impl LocationTag {
 
 #[cfg(test)]
 mod test {
-    use std::{iter, sync::Arc};
+    use std::sync::Arc;
 
     use crate::{
         context::{
@@ -229,6 +236,10 @@ mod test {
 
     #[tokio::test]
     async fn check_all_available_types() {
+        let auth_agent = AUTH_AGENT
+            .clone()
+            .map(Arc::new);
+
         let all_locs = [
             location_data::HARMLESS_LOCATIONS,
             location_data::MODERATE_LOCATIONS,
@@ -237,7 +248,10 @@ mod test {
         .concat();
 
         for (_name, loc) in all_locs {
-            _ = LocationTag::extract_categories_from_nominatim(loc)
+            let auth = auth_agent
+                .as_ref()
+                .map(Arc::clone);
+            _ = LocationTag::extract_categories_from_nominatim(loc, auth)
                 .await
                 .unwrap();
         }
@@ -263,26 +277,39 @@ mod test {
         )
         "#);
 
-        let nom_data = NominatimLocationData::from_cords(element.1)
+        let auth = auth_agent
+            .as_ref()
+            .map(Arc::clone);
+        let nom_data = NominatimLocationData::from_cords(element.1, auth)
             .await
             .unwrap();
         insta::assert_debug_snapshot!(nom_data, @r#"
         NominatimLocationData {
-            class: "building",
-            location_type: "apartments",
-            lat: 52.3715399,
-            lon: 9.7125486,
+            class: "highway",
+            location_type: "pedestrian",
+            lat: 52.3729985,
+            lon: 9.708789774613281,
             _name_map: None,
-            _display_name: "3a, Limmerstraße, Linden-Nord, Linden-Limmer, Hannover, Region Hannover, Niedersachsen, 30451, Deutschland",
+            _display_name: "Linden-Nord, Linden-Limmer, Hannover, Region Hannover, Niedersachsen, 30451, Deutschland",
             _osm_type: "way",
         }
         "#);
-        insta::assert_snapshot!(&nom_data.as_coordinate().as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3715399&mlon=9.7125486#map=17/52.3715399/9.7125486");
+        insta::assert_snapshot!(&nom_data.as_coordinate().as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3729985&mlon=9.708789774613281#map=17/52.3729985/9.708789774613281");
 
-        let mut should_categories: UniqueLocationTags = iter::once(LocationTag::Inside).collect();
-        let mut categories = evaluate_location_as_loaction_tags(element.1, auth_agent).await;
-
-        assert_eq!(should_categories.categories(), categories.categories());
+        let mut categories: Vec<_> = evaluate_location_as_loaction_tags(element.1, auth_agent)
+            .await
+            .categories()
+            .into_iter()
+            .collect();
+        categories.sort();
+        insta::assert_debug_snapshot!(categories, @"
+        [
+            Outside,
+            Street,
+            Pedestrian,
+            Intersection,
+        ]
+        ");
     }
 
     #[tokio::test]
@@ -305,21 +332,24 @@ mod test {
         )
         "#);
 
-        let nom_data = NominatimLocationData::from_cords(element.1)
+        let auth = auth_agent
+            .as_ref()
+            .map(Arc::clone);
+        let nom_data = NominatimLocationData::from_cords(element.1, auth)
             .await
             .unwrap();
         insta::assert_debug_snapshot!(nom_data, @r#"
         NominatimLocationData {
             class: "highway",
             location_type: "secondary",
-            lat: 52.3860214,
-            lon: 9.8088121,
+            lat: 52.386021433663096,
+            lon: 9.808812145300207,
             _name_map: None,
             _display_name: "Karl-Wiechert-Allee, Groß-Buchholz, Buchholz-Kleefeld, Hannover, Region Hannover, Niedersachsen, 30625, Deutschland",
             _osm_type: "way",
         }
         "#);
-        insta::assert_snapshot!(&nom_data.as_coordinate().as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.3860214&mlon=9.8088121#map=17/52.3860214/9.8088121");
+        insta::assert_snapshot!(&nom_data.as_coordinate().as_url_osm(), @"https://www.openstreetmap.org/?mlat=52.386021433663096&mlon=9.808812145300207#map=17/52.386021433663096/9.808812145300207");
 
         let mut should_category: UniqueLocationTags = [
             LocationTag::Outside,

@@ -1,10 +1,38 @@
-use std::{collections::HashMap, io::ErrorKind, path::Path};
+use std::{
+    collections::HashMap,
+    io::ErrorKind,
+    path::Path,
+    sync::{Arc, LazyLock},
+};
 
 use image_flow::{
-    location::coordinate_system::Coordinate, requesters::nominatim::fetch_raw_nominatim_data,
+    location::coordinate_system::Coordinate,
+    requesters::{AuthToHost, nominatim::fetch_raw_nominatim_data},
 };
 use serde_json::json;
 use tokio::fs;
+
+pub static AUTH_AGENT: LazyLock<Option<AuthToHost>> = LazyLock::new(|| {
+    let user_name = option_env!("USER_AGENT_NAME");
+    let passwd = option_env!("PASSWORD");
+    let overpass_url = option_env!("OVERPASS_URL");
+    let nominatim_url = option_env!("NOMINATIM_URL");
+
+    if let Some(passwd) = passwd
+        && let Some(user) = user_name
+        && let Some(overpass_url) = overpass_url
+        && let Some(nominatim_url) = nominatim_url
+    {
+        Some(AuthToHost {
+            overpass_url: overpass_url.to_string(),
+            user: user.to_string(),
+            passwd: passwd.to_string(),
+            nominatim_url: nominatim_url.to_string(),
+        })
+    } else {
+        None
+    }
+});
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 #[tokio::main]
@@ -40,9 +68,15 @@ pub(crate) async fn main() {
         ),
     ]);
 
+    let auth = AUTH_AGENT
+        .clone()
+        .map(Arc::new);
     let mut data = Vec::new();
     for (k, v) in places {
-        let mut raw = fetch_raw_nominatim_data(v)
+        let auth = auth
+            .as_ref()
+            .map(Arc::clone);
+        let mut raw = fetch_raw_nominatim_data(v, auth)
             .await
             .unwrap();
         raw.as_object_mut()

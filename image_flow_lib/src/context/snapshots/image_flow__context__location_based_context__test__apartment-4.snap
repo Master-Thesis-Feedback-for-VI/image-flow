@@ -1,0 +1,10 @@
+---
+source: image_flow_lib/src/context/location_based_context.rs
+expression: categories.categories()
+---
+{
+    Pedestrian,
+    Outside,
+    Street,
+    Intersection,
+}

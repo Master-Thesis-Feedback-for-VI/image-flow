@@ -27,7 +27,7 @@ pub static AUTH_AGENT: LazyLock<Option<AuthToHost>> = LazyLock::new(|| {
         && let Some(url) = url
     {
         Some(AuthToHost {
-            url: url.to_string(),
+            overpass_url: url.to_string(),
             user: user.to_string(),
             passwd: passwd.to_string(),
         })
