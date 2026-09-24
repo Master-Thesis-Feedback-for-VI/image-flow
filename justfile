@@ -100,6 +100,11 @@ clean:
     rm -rf ./.android ./bindings
     rm -rf out pipeline_out
 
+[group('house keeping')]
+clean_out:
+    rm -rf ./out
+    rm -rf ./pipeline_out
+
 tmp_output := "pipeline_out"
 
 [group('scripts')]
@@ -112,7 +117,7 @@ pipeline video_path csv_path tmp_out serialized_output:
         --output {{tmp_out}}
 
 [group('scripts')]
-pipeline_all: pipeline_small pipeline_large pipeline_conti_alehop
+pipeline_all: clean_out pipeline_small pipeline_large pipeline_conti_alehop
 
 [group('scripts')]
 pipeline_small:

@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::{
+    collections::HashSet,
+    sync::{Arc, LazyLock},
+};
 
 use tracing::{Span, instrument};
 
@@ -14,6 +17,8 @@ use crate::{
 };
 
 const MIN_INTERSECTION_NODES: usize = 2;
+static INSIDE_CATEGORIES: LazyLock<HashSet<LocationTag>> =
+    LazyLock::new(|| HashSet::from([LocationTag::Inside, LocationTag::Elevator]));
 
 pub async fn evaluate_image_and_location_as_location_tags(
     pos: impl Into<Coordinate>,
@@ -64,8 +69,20 @@ pub async fn evaluate_location_as_loaction_tags(
     };
 
     let mut categories = UniqueLocationTags::new();
-    let (overpass_category, nominatim_category) = tokio::join!(overpass_fut, nominatim_fut);
+    let (overpass_category, mut nominatim_category) = tokio::join!(overpass_fut, nominatim_fut);
 
+    if overpass_category.contains(LocationTag::Inside) {
+        nominatim_category = nominatim_category
+            .into_iter()
+            .filter(|pred| INSIDE_CATEGORIES.contains(pred))
+            .collect();
+    }
+
+    // dbg!(
+    //     &overpass_category,
+    //     &nominatim_category,
+    //     coordinates.as_url_osm()
+    // );
     categories.extend(overpass_category);
     categories.extend(nominatim_category);
     categories
@@ -163,6 +180,7 @@ impl LocationTag {
             }
         }
 
+        // dbg!(&location_type, &location_class);
         Ok(categories)
     }
 

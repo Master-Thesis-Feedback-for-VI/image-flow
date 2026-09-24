@@ -9,9 +9,6 @@ use serde::{Deserialize, Serialize};
 pub mod image_based_context;
 pub mod location_based_context;
 
-// static INSIDE_CATEGORIES: LazyLock<HashSet<LocationTag>> =
-//     LazyLock::new(|| HashSet::from([LocationTag::Inside, LocationTag::Elevator]));
-
 /// All potential geographic categories supported.
 ///
 /// <https://github.com/Master-Thesis-Feedback-for-VI/image-flow/issues/2>
@@ -78,7 +75,6 @@ impl UniqueLocationTags {
         self.extend([context_category]);
     }
 
-    #[cfg(test)]
     #[must_use]
     pub fn contains(&self, context_category: LocationTag) -> bool {
         self.categories

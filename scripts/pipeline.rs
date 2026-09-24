@@ -1,7 +1,7 @@
 use clap::Parser;
 use image_flow::{
     ImageFlowEvaluationForRecording,
-    context::image_based_context::{ImageRecognizer, ModelVariant::Medium},
+    context::image_based_context::{ImageRecognizer, ModelVariant},
     enable_tracing, image_flow_evaluation_impl,
     location::tabular_gps::DataPointsGPS,
     requesters::AuthToHost,
@@ -86,7 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dir_path = args
         .output
         .unwrap_or(tmp_dir_path);
-    let model = ImageRecognizer::new_impl(Medium, &dir_path).await?;
+    let model = ImageRecognizer::new_impl(ModelVariant::Large, &dir_path).await?;
 
     let file = File::open(args.csv)?;
     let datapoints = DataPointsGPS::from_csv(file)?;
