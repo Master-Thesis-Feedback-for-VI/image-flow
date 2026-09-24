@@ -60,14 +60,14 @@ pub struct ImageFlowEvaluation {
 
 #[derive(Serialize, Deserialize, Clone, Debug, uniffi::Object)]
 pub struct ImageFlowEvaluationForRecording {
-    pub evaluation: ImageFlowEvaluation,
+    pub evaluations: ImageFlowEvaluation,
     pub time_diff: Duration,
     pub location: Coordinate,
 }
 
 /// # Errors
 /// TODO
-#[uniffi::export]
+#[uniffi::export(async_runtime = "tokio")]
 pub async fn image_flow_evaluation_read_from_json(
     path: &str,
 ) -> DefaultResult<Vec<Arc<ImageFlowEvaluationForRecording>>, ImageFlowError> {
@@ -259,7 +259,7 @@ pub async fn image_flow_evaluation_impl(
     })
 }
 
-#[uniffi::export]
+#[uniffi::export(async_runtime = "tokio")]
 impl ImageFlowEvaluation {
     #[uniffi::constructor]
     #[must_use]
@@ -281,6 +281,18 @@ impl ImageFlowEvaluation {
 
         Ok(())
     }
+
+    #[must_use]
+    pub fn location_tags(&self) -> UniqueLocationTags {
+        self.location_tags
+            .clone()
+    }
+
+    #[must_use]
+    pub fn image_detections(&self) -> ImageDetections {
+        self.image_detections
+            .clone()
+    }
 }
 
 #[uniffi::export]
@@ -292,9 +304,9 @@ impl ImageFlowEvaluationForRecording {
         time_diff: Duration,
         location: Coordinate,
     ) -> Self {
-        let evaluation = Arc::unwrap_or_clone(evaluations);
+        let evaluations = Arc::unwrap_or_clone(evaluations);
         Self {
-            evaluation,
+            evaluations,
             time_diff,
             location,
         }
@@ -302,7 +314,7 @@ impl ImageFlowEvaluationForRecording {
 
     #[must_use]
     pub fn evaluation(&self) -> ImageFlowEvaluation {
-        self.evaluation
+        self.evaluations
             .clone()
     }
 
@@ -436,17 +448,18 @@ mod test {
         .await
         .unwrap();
 
-        insta::assert_debug_snapshot!(evaluation, @"
-        UniqueLocationTags {
-            categories: {
-                Inside,
-            },
-            is_inside: true,
-        }
-        ");
+        let location_display = location.print_location_url();
+        assert!(
+            evaluation.contains(LocationTag::Inside),
+            "Check out the location: {location_display}"
+        );
+        insta::assert_debug_snapshot!(evaluation);
 
         let luetzeken = fetch_img("luetzekenstrasse.png").await;
-
+        let location_display = luetzeken
+            .location
+            .unwrap()
+            .as_url_osm();
         let evaluation = recognize_location_tags(
             luetzeken
                 .clone()
@@ -461,6 +474,9 @@ mod test {
         .await
         .unwrap();
         insta::assert_debug_snapshot!(evaluation);
-        assert!(evaluation.contains(LocationTag::Inside));
+        assert!(
+            evaluation.contains(LocationTag::Inside),
+            "Check out the location: {location_display}"
+        );
     }
 }

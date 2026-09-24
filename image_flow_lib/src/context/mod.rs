@@ -2,7 +2,6 @@ use std::{
     collections::{HashSet, hash_set},
     fmt::Display,
     mem,
-    sync::LazyLock,
 };
 
 use serde::{Deserialize, Serialize};
@@ -10,8 +9,8 @@ use serde::{Deserialize, Serialize};
 pub mod image_based_context;
 pub mod location_based_context;
 
-static INSIDE_CATEGORIES: LazyLock<HashSet<LocationTag>> =
-    LazyLock::new(|| HashSet::from([LocationTag::Inside, LocationTag::Elevator]));
+// static INSIDE_CATEGORIES: LazyLock<HashSet<LocationTag>> =
+//     LazyLock::new(|| HashSet::from([LocationTag::Inside, LocationTag::Elevator]));
 
 /// All potential geographic categories supported.
 ///
@@ -52,7 +51,6 @@ impl LocationTag {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, uniffi::Record)]
 pub struct UniqueLocationTags {
     categories: HashSet<LocationTag>,
-    is_inside: bool,
 }
 
 impl UniqueLocationTags {
@@ -60,7 +58,6 @@ impl UniqueLocationTags {
     pub fn new() -> Self {
         Self {
             categories: HashSet::new(),
-            is_inside: false,
         }
     }
 
@@ -78,30 +75,7 @@ impl UniqueLocationTags {
     }
 
     pub fn insert(&mut self, context_category: LocationTag) {
-        let is_inside_category = INSIDE_CATEGORIES.contains(&context_category);
-
-        if self.is_inside && !is_inside_category {
-            return;
-        }
-
-        self.categories
-            .insert(context_category);
-
-        if is_inside_category && !self.is_inside {
-            self.is_inside = true;
-            self.remove_outside_categories();
-        }
-    }
-
-    fn remove_outside_categories(&mut self) {
-        let cat = self
-            .categories
-            .iter()
-            .filter(move |pred| INSIDE_CATEGORIES.contains(pred))
-            .copied()
-            .collect();
-
-        self.categories = cat;
+        self.extend([context_category]);
     }
 
     #[cfg(test)]
@@ -121,20 +95,6 @@ impl UniqueLocationTags {
     pub fn categories(&mut self) -> HashSet<LocationTag> {
         mem::take(&mut self.categories)
     }
-
-    pub(crate) fn extend_by_implied(self) -> Self {
-        let categories = self
-            .categories
-            .into_iter()
-            .flat_map(|category| {
-                category
-                    .implied_additional_categories()
-                    .to_vec()
-            })
-            .collect();
-
-        Self { categories, ..self }
-    }
 }
 
 impl Display for UniqueLocationTags {
@@ -145,11 +105,7 @@ impl Display for UniqueLocationTags {
             .into_iter()
             .collect::<Vec<LocationTag>>();
 
-        let inside = self.is_inside;
-        write!(
-            f,
-            "UniqueLocationTags:\n\tis_inside:\t{inside}\n\t{categories:#?}"
-        )
+        write!(f, "UniqueLocationTags:\n\t{categories:#?}")
     }
 }
 
@@ -158,27 +114,21 @@ impl Extend<LocationTag> for UniqueLocationTags {
     where
         I: IntoIterator<Item = LocationTag>,
     {
-        let items: Vec<LocationTag> = iter
+        let iter = iter
             .into_iter()
-            .collect();
-
-        let just_became_inside = !self.is_inside && items.contains(&LocationTag::Inside);
-
-        if self.is_inside || just_became_inside {
+            .flat_map(|category| {
+                category
+                    .implied_additional_categories()
+                    .to_vec()
+            });
+        self.categories
+            .extend(iter);
+        if self
+            .categories
+            .contains(&LocationTag::Outside)
+        {
             self.categories
-                .extend(
-                    items
-                        .into_iter()
-                        .filter(|c| INSIDE_CATEGORIES.contains(c)),
-                );
-        } else {
-            self.categories
-                .extend(items);
-        }
-
-        if just_became_inside {
-            self.is_inside = true;
-            self.remove_outside_categories();
+                .remove(&LocationTag::Inside);
         }
     }
 }
@@ -216,7 +166,7 @@ mod test {
     use rand::prelude::*;
     use std::collections::HashSet;
 
-    use crate::context::{INSIDE_CATEGORIES, LocationTag, UniqueLocationTags};
+    use crate::context::{LocationTag, UniqueLocationTags};
 
     const ALL_CATS: &[LocationTag] = &[
         LocationTag::Forest,
@@ -238,65 +188,25 @@ mod test {
     }
 
     fn valid_unique_cat(set: &UniqueLocationTags) -> bool {
-        let both = set.contains(LocationTag::Inside) && set.contains(LocationTag::Outside);
-        if both {
-            return false;
-        }
+        let either = set.contains(LocationTag::Inside) ^ set.contains(LocationTag::Outside);
+        let neither = !set.contains(LocationTag::Inside) && !set.contains(LocationTag::Outside);
 
-        if set.contains(LocationTag::Inside) {
-            if !set.is_inside {
-                return false;
-            }
-
-            for cat in &set.categories {
-                if !INSIDE_CATEGORIES.contains(cat) {
-                    return false;
-                }
-            }
-        }
-
-        true
+        either || neither || set.is_empty()
     }
 
     #[test]
     fn cannot_conatain_both() {
-        let all: HashSet<LocationTag> = ALL_CATS
-            .iter()
-            .copied()
-            .collect();
+        let mut tags = UniqueLocationTags::new();
+        tags.extend([LocationTag::Outside, LocationTag::Inside]);
+        assert!(valid_unique_cat(&tags), "Invalid: {tags}");
 
-        let mut unique = UniqueLocationTags::new();
-        for cat in all.clone() {
-            unique.insert(cat);
-        }
-        assert!(valid_unique_cat(&unique));
+        tags = UniqueLocationTags::new();
+        tags.extend([LocationTag::Outside, LocationTag::Intersection]);
+        assert!(valid_unique_cat(&tags), "Invalid: {tags}");
 
-        let mut unique = UniqueLocationTags::new();
-        unique.extend(all);
-        assert!(valid_unique_cat(&unique));
-
-        let inside: UniqueLocationTags = INSIDE_CATEGORIES
-            .iter()
-            .copied()
-            .collect();
-        let outside: UniqueLocationTags = vec![LocationTag::Forest, LocationTag::Street]
-            .into_iter()
-            .collect();
-
-        {
-            let mut inside = inside.clone();
-            let outside = outside.clone();
-
-            inside.extend(outside);
-            assert!(valid_unique_cat(&inside), "merged data: {inside:#?}");
-        }
-
-        {
-            let mut outside = outside;
-
-            outside.extend(inside);
-            assert!(valid_unique_cat(&outside), "merged data: {outside:#?}");
-        }
+        tags = UniqueLocationTags::new();
+        tags.extend([LocationTag::Inside, LocationTag::Intersection]);
+        assert!(valid_unique_cat(&tags), "Invalid: {tags}");
     }
 
     #[test]

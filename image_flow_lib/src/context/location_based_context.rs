@@ -27,18 +27,17 @@ pub async fn evaluate_image_and_location_as_location_tags(
 
     cats.extend(location_cat);
     cats.extend(image_cat);
-    cats.extend_by_implied()
+
+    cats
 }
 
 #[must_use]
 pub fn evaluate_image_as_location_tags(dominant_colors: &DominantColors) -> UniqueLocationTags {
-    let cats = if dominant_colors.any_close_to_forest_green() {
+    if dominant_colors.any_close_to_forest_green() {
         UniqueLocationTags::new_singular(LocationTag::Forest)
     } else {
         UniqueLocationTags::new()
-    };
-
-    cats.extend_by_implied()
+    }
 }
 
 /// TODO
@@ -150,13 +149,10 @@ impl LocationTag {
             "building" => {
                 categories.insert(Self::Inside);
             }
-            "amenity" => {
-                categories.insert(Self::Outside);
-            }
             "railway" => {
                 categories.insert(Self::Railway);
             }
-            "place" => {}
+            "place" | "amenity" => {}
             _ => {
                 unreachable!(
                     "New Class: {location_class}, check it out here: {}",

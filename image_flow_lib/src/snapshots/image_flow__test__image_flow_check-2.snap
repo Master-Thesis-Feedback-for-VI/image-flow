@@ -4,7 +4,6 @@ expression: evaluation
 ---
 ImageFlowEvaluations:
 	locations_tags	UniqueLocationTags:
-	is_inside:	false
 	[
     Outside,
     Forest,

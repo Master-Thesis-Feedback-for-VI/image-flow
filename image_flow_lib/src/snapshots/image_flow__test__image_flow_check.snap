@@ -5,9 +5,8 @@ expression: evaluation
 ImageFlowEvaluation {
     location_tags: UniqueLocationTags {
         categories: {
-            Inside,
+            Outside,
         },
-        is_inside: true,
     },
     image_detections: ImageDetections {
         detections: [

@@ -6,5 +6,4 @@ UniqueLocationTags {
     categories: {
         Inside,
     },
-    is_inside: true,
 }
