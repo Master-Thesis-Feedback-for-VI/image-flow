@@ -60,9 +60,9 @@ pub struct ImageFlowEvaluation {
 
 #[derive(Serialize, Deserialize, Clone, Debug, uniffi::Object)]
 pub struct ImageFlowEvaluationForRecording {
-    evaluations: ImageFlowEvaluation,
-    time_diff: Duration,
-    location: Coordinate,
+    pub evaluation: ImageFlowEvaluation,
+    pub time_diff: Duration,
+    pub location: Coordinate,
 }
 
 /// # Errors
@@ -292,12 +292,28 @@ impl ImageFlowEvaluationForRecording {
         time_diff: Duration,
         location: Coordinate,
     ) -> Self {
-        let evaluations = Arc::unwrap_or_clone(evaluations);
+        let evaluation = Arc::unwrap_or_clone(evaluations);
         Self {
-            evaluations,
+            evaluation,
             time_diff,
             location,
         }
+    }
+
+    #[must_use]
+    pub fn evaluation(&self) -> ImageFlowEvaluation {
+        self.evaluation
+            .clone()
+    }
+
+    #[must_use]
+    pub const fn time_diff(&self) -> Duration {
+        self.time_diff
+    }
+
+    #[must_use]
+    pub const fn location(&self) -> Coordinate {
+        self.location
     }
 }
 
