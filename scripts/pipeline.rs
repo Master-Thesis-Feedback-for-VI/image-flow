@@ -96,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &args.vid,
         &datapoints,
         &dir_path,
-        chrono::Duration::seconds(1),
+        chrono::Duration::milliseconds(200),
     )
     .await?;
     println!("... finished now proceeding to data tagging");

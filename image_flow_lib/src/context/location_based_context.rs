@@ -54,6 +54,7 @@ pub async fn evaluate_location_as_loaction_tags(
     auth: Option<Arc<AuthToHost>>,
 ) -> UniqueLocationTags {
     let coordinates: Coordinate = pos.into();
+    // dbg!(coordinates.as_url_osm());
 
     let overpass_auth = auth
         .as_ref()
@@ -69,10 +70,17 @@ pub async fn evaluate_location_as_loaction_tags(
     };
 
     let mut categories = UniqueLocationTags::new();
-    let (overpass_category, mut nominatim_category) = tokio::join!(overpass_fut, nominatim_fut);
+    let (mut overpass_category, mut nominatim_category) = tokio::join!(overpass_fut, nominatim_fut);
+
+    // dbg!(&overpass_category, &nominatim_category);
 
     if overpass_category.contains(LocationTag::Inside) {
         nominatim_category = nominatim_category
+            .into_iter()
+            .filter(|pred| INSIDE_CATEGORIES.contains(pred))
+            .collect();
+    } else if nominatim_category.contains(LocationTag::Inside) {
+        overpass_category = overpass_category
             .into_iter()
             .filter(|pred| INSIDE_CATEGORIES.contains(pred))
             .collect();
@@ -111,7 +119,7 @@ impl LocationTag {
             "elevator" => {
                 categories.insert(Self::Elevator);
             }
-            "apartments" | "library" | "cafe" | "pub" | "house" | "university" => {
+            "apartments" | "library" | "cafe" | "pub" | "house" | "university" | "hospital" => {
                 categories.insert(Self::Inside);
             }
             "track" => {
@@ -198,7 +206,7 @@ impl LocationTag {
 
         let mut categories = UniqueLocationTags::new();
 
-        let intersections = find_nearby_intersections(coordinates, 50., auth.clone())
+        let intersections = find_nearby_intersections(coordinates, 10., auth.clone())
             .await
             .inspect_err(|e| {
                 tracing::error!(

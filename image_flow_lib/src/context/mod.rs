@@ -91,6 +91,11 @@ impl UniqueLocationTags {
     pub fn categories(&mut self) -> HashSet<LocationTag> {
         mem::take(&mut self.categories)
     }
+
+    pub fn remove(&mut self, tag: &LocationTag) {
+        self.categories
+            .remove(tag);
+    }
 }
 
 impl Display for UniqueLocationTags {
