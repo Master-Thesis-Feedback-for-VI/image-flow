@@ -17,15 +17,23 @@ pub mod location_based_context;
     uniffi::Enum, Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
 pub enum LocationTag {
+    Railway,
+    Street,
+    Parking,
+    Intersection,
+    Pedestrian,
     Forest,
     Outside,
     Inside,
-    Street,
-    Pedestrian,
-    Intersection,
-    Parking,
-    Railway,
     Elevator,
+}
+
+#[uniffi::export]
+#[must_use]
+pub fn sort_location_tags(categories: &[LocationTag]) -> Vec<LocationTag> {
+    let mut copied_categories = categories.to_vec();
+    copied_categories.sort_unstable();
+    copied_categories
 }
 
 impl LocationTag {

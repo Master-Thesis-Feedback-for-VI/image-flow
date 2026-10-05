@@ -49,6 +49,7 @@ use crate::{
 };
 use std::fmt::Display;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use std::{result::Result as DefaultResult, sync::Arc};
 
@@ -127,19 +128,27 @@ pub async fn recognize_location_tags(
 }
 
 // === LOGGING ===
+static TRACING_ENABLED: AtomicBool = AtomicBool::new(false);
 
 #[must_use]
 #[uniffi::export]
 pub fn enable_tracing(rust_log: Option<FilterLevel>) -> bool {
+    if TRACING_ENABLED.load(Ordering::Relaxed) {
+        return true;
+    }
+
     let rust_log = rust_log.unwrap_or_default();
     let tag = rust_log.to_string();
 
-    tracing_subscriber::fmt()
+    let enabled = tracing_subscriber::fmt()
         .with_env_filter(tag)
         .with_target(true)
         .with_thread_ids(true)
         .try_init()
-        .is_ok()
+        .is_ok();
+
+    TRACING_ENABLED.store(enabled, Ordering::Relaxed);
+    enabled
 }
 
 #[derive(uniffi::Enum, Clone, Copy, Debug, Default)]

@@ -326,10 +326,9 @@ mod test {
         categories.sort();
         insta::assert_debug_snapshot!(categories, @"
         [
-            Outside,
             Street,
             Pedestrian,
-            Intersection,
+            Outside,
         ]
         ");
     }
