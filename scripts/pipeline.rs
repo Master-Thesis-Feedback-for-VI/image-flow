@@ -23,6 +23,7 @@ use zip::CompressionMethod;
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
+const FRAME_DIFF_DURATION_IN_MILIS: i64 = 200;
 pub static AUTH_AGENT: LazyLock<Option<AuthToHost>> = LazyLock::new(|| {
     let user_name = option_env!("USER_AGENT_NAME");
     let passwd = option_env!("PASSWORD");
@@ -96,7 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &args.vid,
         &datapoints,
         &dir_path,
-        chrono::Duration::milliseconds(200),
+        chrono::Duration::milliseconds(FRAME_DIFF_DURATION_IN_MILIS),
     )
     .await?;
     println!("... finished now proceeding to data tagging");
@@ -104,7 +105,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut unique_geo_cat_collection: Vec<ImageFlowEvaluationForRecording> = Vec::new();
     for (location, frame) in zipped.iter() {
         let auth = AUTH_AGENT.clone();
-        let evaluation = image_flow_evaluation_impl(*location, auth, frame, &model, 4).await;
+        let evaluation = image_flow_evaluation_impl(*location, auth, frame, &model, 4, true).await;
 
         match evaluation {
             Ok(eva) => {
@@ -116,7 +117,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let evaluated =
                     ImageFlowEvaluationForRecording::new(Arc::new(eva), time_diff, *location);
 
-                println!("This data was captured:\n{evaluated:#?}");
+                // println!("This data was captured:\n{evaluated:#?}");
+                println!("Evaluated frame...");
                 unique_geo_cat_collection.push(evaluated);
             }
             Err(e) => {

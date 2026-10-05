@@ -6,9 +6,11 @@ use std::{
 use tracing::{Span, instrument};
 
 use crate::{
-    context::{LocationTag, UniqueLocationTags},
     image_processor::DominantColors,
-    location::coordinate_system::Coordinate,
+    location::{
+        coordinate_system::Coordinate,
+        tag::{LocationTag, UniqueLocationTags},
+    },
     requesters::{
         AuthToHost,
         nominatim::NominatimLocationData,
@@ -244,11 +246,11 @@ mod test {
     use std::sync::Arc;
 
     use crate::{
-        context::{
-            LocationTag, UniqueLocationTags,
-            location_based_context::evaluate_location_as_loaction_tags,
+        context::location_based_context::evaluate_location_as_loaction_tags,
+        location::{
+            coordinate_system::Coordinate,
+            tag::{LocationTag, UniqueLocationTags},
         },
-        location::coordinate_system::Coordinate,
         requesters::nominatim::NominatimLocationData,
         tests::{
             AUTH_AGENT, fetch_img,

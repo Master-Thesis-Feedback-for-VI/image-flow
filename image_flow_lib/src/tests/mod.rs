@@ -9,7 +9,8 @@ use std::{
 use tokio::sync::Mutex;
 
 use crate::{
-    context::LocationTag, location::coordinate_system::Coordinate, requesters::AuthToHost,
+    location::{coordinate_system::Coordinate, tag::LocationTag},
+    requesters::AuthToHost,
 };
 
 pub mod location_data;

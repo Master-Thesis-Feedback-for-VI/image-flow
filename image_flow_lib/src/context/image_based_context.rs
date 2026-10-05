@@ -1,5 +1,3 @@
-use std::fmt::Display;
-use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::result::Result as DefaultResult;
 use std::sync::Arc;
@@ -7,16 +5,17 @@ use std::time::Duration as DefaultDuration;
 
 use chrono::Duration;
 use reqwest::Url;
-use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncWriteExt as _, BufWriter};
 use tokio::sync::Mutex;
 use tokio_stream::StreamExt;
 use tracing::instrument;
 use ultralytics_inference::{Results as DetectionResults, YOLOModel};
 
-use crate::context::{LocationTag, UniqueLocationTags};
 use crate::error::ImageFlowError;
+use crate::image::depth::DepthMap;
+use crate::image::detections::{DetectionType, ImageDetections};
 use crate::image_processor::DominantColors;
+use crate::location::tag::{LocationTag, UniqueLocationTags};
 
 const TRAFFIC_LIGHT_THRESHOLD: usize = 8;
 const OUTSIDE_THRESHOLD: &[(DetectionType, usize)] = &[
@@ -28,7 +27,6 @@ const OUTSIDE_THRESHOLD: &[(DetectionType, usize)] = &[
     (DetectionType::DiningTable, 2),
 ];
 
-/// TODO
 #[instrument]
 #[must_use]
 pub(crate) fn evaluate_image_into_location_tags(
@@ -97,6 +95,19 @@ impl ImageRecognizer {
     pub fn object_detection_model_path(&self) -> String {
         let tmp = self
             .obj_detection
+            .path
+            .clone();
+        tmp.into_os_string()
+            .into_string()
+            .expect("Invalid UTF-8")
+    }
+
+    /// # Panics
+    /// TODO
+    #[must_use]
+    pub fn depth_detection_model_path(&self) -> String {
+        let tmp = self
+            .depth_recognition
             .path
             .clone();
         tmp.into_os_string()
@@ -220,9 +231,38 @@ impl ImageRecognizer {
         assert_eq!(predictions.len(), 1);
 
         let result = predictions.remove(0);
-        let image_detections = ImageDetections::from_detection_result(&result);
+        let image_detections = ImageDetections::from(result);
 
         Ok(image_detections)
+    }
+
+    /// # Errors
+    /// TODO
+    ///
+    /// # Panics
+    /// TODO
+    pub async fn predict_depth(&self, path: impl AsRef<Path>) -> crate::Result<DepthMap> {
+        let path = path
+            .as_ref()
+            .to_path_buf();
+        let depth_detection_model = Arc::clone(&self.depth_recognition);
+
+        let mut predictions =
+            tokio::task::spawn_blocking(move || -> crate::Result<Vec<DetectionResults>> {
+                let predictions = depth_detection_model
+                    .model
+                    .blocking_lock()
+                    .predict(path)?;
+
+                Ok(predictions)
+            })
+            .await??;
+        assert_eq!(predictions.len(), 1);
+
+        let result = predictions.remove(0);
+        let depth_map = DepthMap::try_from(result)?;
+
+        Ok(depth_map)
     }
 
     /// Streams the model to `tmp_path`. Verifies size when the server reports
@@ -392,183 +432,5 @@ impl Drop for FramePath {
         if self.should_drop {
             let _ = std::fs::remove_file(&self.path);
         }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, uniffi::Enum, Eq, PartialOrd, Ord)]
-pub enum DetectionType {
-    Bench,
-    Bicycle,
-    Car,
-    Chair,
-    Cup,
-    DiningTable,
-    Handbag,
-    Laptop,
-    Person,
-    TrafficLight,
-    Tv,
-    Keyboard,
-
-    Unknown(String),
-}
-
-impl DetectionType {
-    fn from_str(name: &str) -> Self {
-        let name = name.to_lowercase();
-        match name.as_str() {
-            "person" => Self::Person,
-            "traffic light" => Self::TrafficLight,
-            "car" => Self::Car,
-            "bicycle" => Self::Bicycle,
-            "bench" => Self::Bench,
-            "chair" => Self::Chair,
-            "dining table" => Self::DiningTable,
-            "cup" => Self::Cup,
-            "handbag" => Self::Handbag,
-            "laptop" => Self::Laptop,
-            "tv" => Self::Tv,
-            "keyboard" => Self::Keyboard,
-            _ => Self::Unknown(name),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, uniffi::Record)]
-pub struct BoundingBox {
-    x1: f32,
-    x2: f32,
-    y1: f32,
-    y2: f32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Record)]
-pub struct Detection {
-    confidence: f32,
-    pub(crate) name: DetectionType,
-    xyxy: BoundingBox,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, uniffi::Record)]
-pub struct ImageDetections {
-    pub(crate) detections: Vec<Detection>,
-}
-
-impl ImageDetections {
-    #[must_use]
-    pub const fn new() -> Self {
-        Self {
-            detections: Vec::new(),
-        }
-    }
-
-    #[instrument]
-    fn from_detection_result(res: &DetectionResults) -> Self {
-        let mut detections = Vec::new();
-
-        if let Some(boxes) = &res.boxes {
-            for i in 0..boxes.len() {
-                let xyxy_tmp = boxes.xyxy();
-                let xyxy_row = xyxy_tmp.row(i);
-                let xyxy = BoundingBox {
-                    x1: xyxy_row[0],
-                    x2: xyxy_row[2],
-                    y1: xyxy_row[1],
-                    y2: xyxy_row[3],
-                };
-
-                let cls = boxes.cls()[i] as usize;
-                let conf = boxes.conf()[i];
-                let name = res
-                    .names
-                    .get(&cls)
-                    .map_or("unknown", |s| s.as_str());
-
-                let detection = Detection {
-                    name: DetectionType::from_str(name),
-                    confidence: conf,
-                    xyxy,
-                };
-                detections.push(detection);
-            }
-        }
-
-        Self { detections }
-    }
-
-    fn get_by_detected_object(
-        &self,
-        detection_type: DetectionType,
-    ) -> impl Iterator<Item = &Detection> {
-        self.iter()
-            .filter(move |pred| pred.name == detection_type)
-    }
-
-    fn is_outside(&self, minimums: &[(DetectionType, usize)]) -> bool {
-        minimums
-            .iter()
-            .any(|(kind, minimum)| {
-                self.iter()
-                    .filter(|pred| pred.name == *kind)
-                    .count()
-                    >= *minimum
-            })
-    }
-
-    #[must_use]
-    pub fn into_inner(self) -> Vec<Detection> {
-        self.detections
-    }
-}
-
-impl Display for ImageDetections {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let amount_detections = self
-            .detections
-            .len();
-        writeln!(f, "Amount of objects detected: {amount_detections}")?;
-        for (idx, detection) in self
-            .detections
-            .iter()
-            .enumerate()
-        {
-            write!(f, "\t{detection:?}")?;
-
-            if idx < amount_detections - 1 {
-                writeln!(f)?;
-            }
-        }
-
-        Ok(())
-    }
-}
-
-impl From<DetectionResults> for ImageDetections {
-    fn from(value: DetectionResults) -> Self {
-        Self::from_detection_result(&value)
-    }
-}
-
-impl Deref for ImageDetections {
-    type Target = Vec<Detection>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.detections
-    }
-}
-
-impl IntoIterator for ImageDetections {
-    type Item = Detection;
-    type IntoIter = std::vec::IntoIter<Detection>;
-    fn into_iter(self) -> Self::IntoIter {
-        self.detections
-            .into_iter()
-    }
-}
-
-impl Extend<Detection> for ImageDetections {
-    fn extend<T: IntoIterator<Item = Detection>>(&mut self, iter: T) {
-        self.detections
-            .extend(iter);
     }
 }

@@ -1634,6 +1634,7 @@ dependencies = [
  "image",
  "insta",
  "kmeans_colors",
+ "ndarray",
  "palette",
  "rand 0.10.3",
  "reqwest",
@@ -2135,6 +2136,7 @@ dependencies = [
  "portable-atomic-util",
  "rawpointer",
  "rayon",
+ "serde",
 ]
 
 [[package]]

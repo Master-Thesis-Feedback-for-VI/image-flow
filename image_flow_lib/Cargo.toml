@@ -59,6 +59,7 @@ futures = "0.3"
 futures-util = "0.3"
 zip = { version = "8", optional = true }
 walkdir = { version = "2.5", optional = true }
+ndarray = { version = "0.17", features = ["serde"] }
 
 [dev-dependencies]
 insta = "1.48"

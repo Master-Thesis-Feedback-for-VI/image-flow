@@ -10,9 +10,8 @@ use std::{
 use tokio::time::Duration;
 
 use crate::{
-    context::LocationTag,
     error,
-    location::coordinate_system::Coordinate,
+    location::{coordinate_system::Coordinate, tag::LocationTag},
     requesters::{AuthToHost, client::throttled_post},
 };
 
@@ -309,7 +308,7 @@ mod test {
     use std::sync::Arc;
 
     use crate::{
-        context::LocationTag,
+        location::tag::LocationTag,
         requesters::overpass::inside_building,
         tests::{AUTH_AGENT, fetch_img},
     };
