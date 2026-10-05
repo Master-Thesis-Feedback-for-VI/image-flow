@@ -192,7 +192,7 @@ pub async fn recognize_objects_in_image_impl(
     }
 
     image_recognizer
-        .predict(path)
+        .predict_objects(path)
         .await
 }
 

@@ -2,7 +2,7 @@ use std::fmt::Display;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::result::Result as DefaultResult;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 use std::time::Duration as DefaultDuration;
 
 use chrono::Duration;
@@ -59,12 +59,23 @@ pub(crate) fn evaluate_image_into_location_tags(
     categories
 }
 
+#[derive(Debug)]
+pub struct ObjectDetectionModel {
+    path: PathBuf,
+    model: Arc<Mutex<YOLOModel>>,
+}
+
+#[derive(Debug)]
+pub struct DepthDetectionModel {
+    path: PathBuf,
+    model: Arc<Mutex<YOLOModel>>,
+}
+
 #[derive(Debug, uniffi::Object)]
 pub struct ImageRecognizer {
-    pub model_variant: ModelVariant,
-    model_path: PathBuf,
-
-    model: Arc<Mutex<YOLOModel>>,
+    pub variant: ModelVariant,
+    obj_detection: Arc<ObjectDetectionModel>,
+    depth_recognition: Arc<DepthDetectionModel>,
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -83,9 +94,10 @@ impl ImageRecognizer {
     /// # Panics
     /// TODO
     #[must_use]
-    pub fn model_path(&self) -> String {
+    pub fn object_detection_model_path(&self) -> String {
         let tmp = self
-            .model_path
+            .obj_detection
+            .path
             .clone();
         tmp.into_os_string()
             .into_string()
@@ -97,7 +109,7 @@ impl ImageRecognizer {
     /// # Errors
     /// TODO
     pub async fn new_impl(
-        model_variant: ModelVariant,
+        variant: ModelVariant,
         download_path: impl AsRef<Path>,
     ) -> crate::Result<Self> {
         let path = download_path
@@ -109,25 +121,52 @@ impl ImageRecognizer {
             return Err(crate::error::io(msg));
         }
 
-        let file_path = path.join(model_variant.model_name());
+        let (obj_url, depth_url) = variant.build_urls();
 
+        let obj_detection_file_path = path.join(variant.object_detection_model_name());
+        let obj_detection_model_fut = Self::load_or_download(&obj_detection_file_path, obj_url);
+
+        let depth_detection_file_path = path.join(variant.depth_detection_model_name());
+        let depth_detection_model_fut =
+            Self::load_or_download(&depth_detection_file_path, depth_url);
+
+        let (obj_detection_model, depth_detection_model) =
+            tokio::try_join!(obj_detection_model_fut, depth_detection_model_fut)?;
+
+        let obj_detection = ObjectDetectionModel {
+            path: obj_detection_file_path,
+            model: Arc::new(Mutex::new(obj_detection_model)),
+        };
+        let depth_detection = DepthDetectionModel {
+            path: depth_detection_file_path,
+            model: Arc::new(Mutex::new(depth_detection_model)),
+        };
+
+        Ok(Self {
+            variant,
+            obj_detection: obj_detection.into(),
+            depth_recognition: depth_detection.into(),
+        })
+    }
+
+    async fn load_or_download(
+        file_path: impl AsRef<Path>,
+        download_url: Url,
+    ) -> crate::Result<YOLOModel> {
+        let file_path = file_path.as_ref();
         if file_path.is_file() {
-            let load_path = file_path.clone();
+            let load_path = file_path.to_path_buf();
             let model = tokio::task::spawn_blocking(move || -> crate::Result<YOLOModel> {
                 Ok(YOLOModel::load(load_path)?)
             })
             .await??;
 
-            return Ok(Self {
-                model_variant,
-                model_path: file_path,
-                model: Arc::new(Mutex::new(model)),
-            });
+            return Ok(model);
         }
 
         let tmp_path = file_path.with_extension("part");
 
-        if let Err(e) = Self::download_to(&model_variant, &tmp_path).await {
+        if let Err(e) = Self::download_to(&tmp_path, download_url).await {
             // Best-effort cleanup of any partial temp file.
             let _ = tokio::fs::remove_file(&tmp_path).await;
             return Err(e);
@@ -137,17 +176,13 @@ impl ImageRecognizer {
             .await
             .map_err(|e| crate::error::io(format!("Failed to finalize downloaded file: {e}")))?;
 
-        let load_path = file_path.clone();
+        let load_path = file_path.to_path_buf();
         let model = tokio::task::spawn_blocking(move || -> crate::Result<YOLOModel> {
             Ok(YOLOModel::load(load_path)?)
         })
         .await??;
 
-        Ok(Self {
-            model_variant,
-            model_path: file_path,
-            model: Arc::new(Mutex::new(model)),
-        })
+        Ok(model)
     }
 
     /// # Errors
@@ -166,15 +201,16 @@ impl ImageRecognizer {
     /// The API from Ulatralytics is weird here. Per image 1 Results struct is created containing
     /// all Results and detections from one image. So having multiple makes no sense and there
     /// always only exists one Results even if nothing is detected!
-    pub async fn predict(&self, path: impl AsRef<Path>) -> crate::Result<ImageDetections> {
+    pub async fn predict_objects(&self, path: impl AsRef<Path>) -> crate::Result<ImageDetections> {
         let path = path
             .as_ref()
             .to_path_buf();
-        let model = Arc::clone(&self.model);
+        let obj_detection_model = Arc::clone(&self.obj_detection);
 
         let mut predictions =
             tokio::task::spawn_blocking(move || -> crate::Result<Vec<DetectionResults>> {
-                let predictions = model
+                let predictions = obj_detection_model
+                    .model
                     .blocking_lock()
                     .predict(path)?;
 
@@ -192,9 +228,7 @@ impl ImageRecognizer {
     /// Streams the model to `tmp_path`. Verifies size when the server reports
     /// `Content-Length`, but doesn't hard-fail if that header is absent (some
     /// CDNs/chunked responses omit it).
-    async fn download_to(model_variant: &ModelVariant, tmp_path: &Path) -> crate::Result<()> {
-        let download_url = model_variant.build_url();
-
+    async fn download_to(tmp_path: &Path, download_url: Url) -> crate::Result<()> {
         let client = reqwest::Client::builder()
             .timeout(DefaultDuration::from_mins(5))
             .build()
@@ -266,24 +300,14 @@ pub enum ModelVariant {
     XLarge,
 }
 
-static BASE_URL: LazyLock<Url> = LazyLock::new(|| {
-    let base_url = "https://github.com/ultralytics/assets/releases/download/v8.4.0/";
-
-    Url::parse(base_url).expect("We know this cant fail since the above url is valid")
-});
-
 impl ModelVariant {
-    fn build_url(&self) -> Url {
-        let mut url = BASE_URL.clone();
+    fn base_url() -> Url {
+        let base_url = "https://github.com/ultralytics/assets/releases/download/v8.4.0/";
 
-        let model_name = self.model_name();
-        url.path_segments_mut()
-            .expect("This cannot fail since the url is valid")
-            .push(model_name);
-        url
+        Url::parse(base_url).expect("We know this cant fail since the above url is valid")
     }
 
-    const fn model_name(&self) -> &str {
+    const fn object_detection_model_name(&self) -> &str {
         match self {
             Self::Nano => "yolo26n.onnx",
             Self::Small => "yolo26s.onnx",
@@ -291,6 +315,36 @@ impl ModelVariant {
             Self::Large => "yolo26l.onnx",
             Self::XLarge => "yolo26x.onnx",
         }
+    }
+
+    const fn depth_detection_model_name(&self) -> &str {
+        match self {
+            Self::Nano => "yolo26n-depth.onnx",
+            Self::Small => "yolo26s-depth.onnx",
+            Self::Medium => "yolo26m-depth.onnx",
+            Self::Large => "yolo26l-depth.onnx",
+            Self::XLarge => "yolo26xl-depth.onnx",
+        }
+    }
+
+    fn build_urls(&self) -> (Url, Url) {
+        let mut url_obj = Self::base_url();
+        let mut url_depth = Self::base_url();
+
+        let obj_name = self.object_detection_model_name();
+        let depth_name = self.depth_detection_model_name();
+
+        url_obj
+            .path_segments_mut()
+            .expect("This cannot fail since the url is valid")
+            .push(obj_name);
+
+        url_depth
+            .path_segments_mut()
+            .expect("This cannot fail since the url is valid")
+            .push(depth_name);
+
+        (url_obj, url_depth)
     }
 }
 
