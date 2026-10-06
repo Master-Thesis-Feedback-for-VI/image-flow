@@ -119,6 +119,7 @@ impl ImageRecognizer {
 impl ImageRecognizer {
     /// # Errors
     /// TODO
+    #[instrument(skip(download_path), fields(download_path = tracing::field::Empty))]
     pub async fn new_impl(
         variant: ModelVariant,
         download_path: impl AsRef<Path>,
@@ -126,6 +127,9 @@ impl ImageRecognizer {
         let path = download_path
             .as_ref()
             .to_path_buf();
+
+        let span = tracing::Span::current();
+        span.record("download_path", tracing::field::debug(&path));
 
         if !path.is_dir() {
             let msg = format!("The dir: {}, does not exist", path.display());
@@ -153,6 +157,7 @@ impl ImageRecognizer {
             model: Arc::new(Mutex::new(depth_detection_model)),
         };
 
+        tracing::info!("Sucessfully Loaded both models");
         Ok(Self {
             variant,
             obj_detection: obj_detection.into(),

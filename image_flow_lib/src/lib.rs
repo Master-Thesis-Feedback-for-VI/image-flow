@@ -357,6 +357,13 @@ impl ImageFlowEvaluation {
         self.image_detections
             .clone()
     }
+
+    #[must_use]
+    pub fn depth_map(&self) -> Option<Arc<DepthMap>> {
+        self.depth_detction
+            .clone()
+            .map(Arc::new)
+    }
 }
 
 #[uniffi::export]
