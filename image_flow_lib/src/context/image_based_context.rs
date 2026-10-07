@@ -18,14 +18,14 @@ use crate::image_processor::DominantColors;
 use crate::location::tag::{LocationTag, UniqueLocationTags};
 
 const TRAFFIC_LIGHT_THRESHOLD: usize = 8;
-const OUTSIDE_THRESHOLD: &[(DetectionType, usize)] = &[
-    (DetectionType::Person, 7),
-    (DetectionType::TrafficLight, 1),
-    (DetectionType::Car, 1),
-    (DetectionType::Bench, 2),
-    (DetectionType::Bicycle, 1),
-    (DetectionType::DiningTable, 2),
-];
+// const OUTSIDE_THRESHOLD: &[(DetectionType, usize)] = &[
+//     (DetectionType::Person, 7),
+//     (DetectionType::TrafficLight, 1),
+//     (DetectionType::Car, 1),
+//     (DetectionType::Bench, 2),
+//     (DetectionType::Bicycle, 1),
+//     (DetectionType::DiningTable, 2),
+// ];
 
 #[instrument]
 #[must_use]
@@ -35,24 +35,23 @@ pub(crate) fn evaluate_image_into_location_tags(
 ) -> UniqueLocationTags {
     let mut categories = UniqueLocationTags::new();
 
-    let is_outside = detections.is_outside(OUTSIDE_THRESHOLD);
-    if is_outside {
-        categories.insert(LocationTag::Outside);
-    }
+    // let is_outside = detections.is_outside(OUTSIDE_THRESHOLD);
+    // if is_outside {
+    //     categories.insert(LocationTag::Outside);
+    // }
 
     let intersection_count = detections
         .get_by_detected_object(DetectionType::TrafficLight)
         .count();
     if intersection_count > TRAFFIC_LIGHT_THRESHOLD {
-        categories.insert(LocationTag::Intersection);
+        categories.extend([LocationTag::Intersection, LocationTag::Outside]);
     }
 
     let in_forest = dominant_colors
         .iter()
         .any(|color| color.is_close_to_forest_green());
     if in_forest {
-        categories.insert(LocationTag::Outside);
-        categories.insert(LocationTag::Forest);
+        categories.extend([LocationTag::Outside, LocationTag::Forest]);
     }
     categories
 }

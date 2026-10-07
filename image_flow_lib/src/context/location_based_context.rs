@@ -1,7 +1,4 @@
-use std::{
-    collections::HashSet,
-    sync::{Arc, LazyLock},
-};
+use std::sync::Arc;
 
 use tracing::{Span, instrument};
 
@@ -19,8 +16,8 @@ use crate::{
 };
 
 const MIN_INTERSECTION_NODES: usize = 2;
-static INSIDE_CATEGORIES: LazyLock<HashSet<LocationTag>> =
-    LazyLock::new(|| HashSet::from([LocationTag::Inside, LocationTag::Elevator]));
+// static INSIDE_CATEGORIES: LazyLock<HashSet<LocationTag>> =
+//     LazyLock::new(|| HashSet::from([LocationTag::Inside, LocationTag::Elevator]));
 
 pub async fn evaluate_image_and_location_as_location_tags(
     pos: impl Into<Coordinate>,
@@ -61,6 +58,7 @@ pub async fn evaluate_location_as_loaction_tags(
     let overpass_auth = auth
         .as_ref()
         .map(Arc::clone);
+
     let overpass_fut = LocationTag::extract_categories_from_overpass(coordinates, overpass_auth);
     let nominatim_fut = async {
         LocationTag::extract_categories_from_nominatim(coordinates, auth)
@@ -77,15 +75,15 @@ pub async fn evaluate_location_as_loaction_tags(
     // dbg!(&overpass_category, &nominatim_category);
 
     if overpass_category.contains(LocationTag::Inside) {
-        nominatim_category = nominatim_category
-            .into_iter()
-            .filter(|pred| INSIDE_CATEGORIES.contains(pred))
-            .collect();
+        nominatim_category.remove(&LocationTag::Outside);
+        // .into_iter()
+        // .filter(|pred| INSIDE_CATEGORIES.contains(pred))
+        // .collect();
     } else if nominatim_category.contains(LocationTag::Inside) {
-        overpass_category = overpass_category
-            .into_iter()
-            .filter(|pred| INSIDE_CATEGORIES.contains(pred))
-            .collect();
+        overpass_category.remove(&LocationTag::Outside);
+        // .into_iter()
+        // .filter(|pred| INSIDE_CATEGORIES.contains(pred))
+        // .collect();
     }
 
     // dbg!(

@@ -40,11 +40,11 @@ impl LocationTag {
             Self::Forest => &[Self::Outside, Self::Forest],
             Self::Outside => &[Self::Outside],
             Self::Inside => &[Self::Inside],
-            Self::Street => &[Self::Outside, Self::Street],
-            Self::Pedestrian => &[Self::Outside, Self::Pedestrian],
+            Self::Street => &[Self::Street],
+            Self::Pedestrian => &[Self::Pedestrian],
             Self::Intersection => &[Self::Outside, Self::Intersection],
             Self::Elevator => &[Self::Elevator],
-            Self::Parking => &[Self::Parking, Self::Outside, Self::Street],
+            Self::Parking => &[Self::Parking, Self::Street],
             Self::Railway => &[Self::Railway],
         }
     }
