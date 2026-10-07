@@ -56,7 +56,6 @@ use std::{result::Result as DefaultResult, sync::Arc};
 pub struct ImageFlowEvaluation {
     location_tags: UniqueLocationTags,
     image_detections: ImageDetections,
-    depth_detction: Option<DepthMap>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, uniffi::Object)]
@@ -93,7 +92,7 @@ pub async fn image_flow_evaluation(
     img_path: &str,
     image_recognizer: Arc<ImageRecognizer>,
     amount: u32,
-    disable_depth_detection: bool,
+    include_depth: bool,
 ) -> DefaultResult<ImageFlowEvaluation, ImageFlowError> {
     let img_flow = image_flow_evaluation_impl(
         location,
@@ -101,7 +100,7 @@ pub async fn image_flow_evaluation(
         img_path,
         &image_recognizer,
         amount as usize,
-        disable_depth_detection,
+        include_depth,
     )
     .await?;
 
@@ -114,8 +113,10 @@ pub async fn image_flow_evaluation(
 pub async fn recognize_objects_in_image(
     path: &str,
     image_recognizer: Arc<ImageRecognizer>,
+    include_depth: bool,
 ) -> DefaultResult<ImageDetections, ImageFlowError> {
-    let detections = recognize_objects_in_image_impl(path, &image_recognizer).await?;
+    let detections =
+        recognize_objects_in_image_impl(path, &image_recognizer, include_depth).await?;
 
     Ok(detections)
 }
@@ -203,6 +204,7 @@ impl Display for FilterLevel {
 pub async fn recognize_objects_in_image_impl(
     path: impl AsRef<Path>,
     image_recognizer: &ImageRecognizer,
+    include_depth: bool,
 ) -> crate::Result<ImageDetections> {
     let path = path.as_ref();
     if !path.exists() {
@@ -211,7 +213,7 @@ pub async fn recognize_objects_in_image_impl(
     }
 
     image_recognizer
-        .predict_objects(path)
+        .predict_objects(path, include_depth)
         .await
 }
 
@@ -263,7 +265,7 @@ pub async fn image_flow_evaluation_impl(
     img_path: impl AsRef<Path>,
     image_recognizer: &ImageRecognizer,
     amount: usize,
-    disable_depth_detection: bool,
+    include_depth: bool,
 ) -> crate::Result<ImageFlowEvaluation> {
     let img_path = img_path
         .as_ref()
@@ -274,8 +276,8 @@ pub async fn image_flow_evaluation_impl(
         return Err(crate::error::file_does_not_exist(err_msg));
     }
 
-    let detections_fut = recognize_objects_in_image_impl(&img_path, image_recognizer);
-    let depth_fut = recognize_depth_in_image_impl(&img_path, image_recognizer);
+    let detections_fut =
+        recognize_objects_in_image_impl(&img_path, image_recognizer, include_depth);
 
     let send_img_path = img_path.clone();
     let location_tags_dom_colors_fut: JoinHandle<
@@ -292,20 +294,10 @@ pub async fn image_flow_evaluation_impl(
         Ok((location_tags, dominant_colors))
     });
 
-    let (image_detections, depth_map, location_tags_dom_colors) = if disable_depth_detection {
-        let (image_detections_tmp, location_tags_dom_colors_tmp) =
-            tokio::join!(detections_fut, location_tags_dom_colors_fut);
-        (image_detections_tmp?, None, location_tags_dom_colors_tmp??)
-    } else {
-        let (image_detections_tmp, depth_map_tmp, location_tags_dom_colors_tmp) =
-            tokio::join!(detections_fut, depth_fut, location_tags_dom_colors_fut);
-        (
-            image_detections_tmp?,
-            Some(depth_map_tmp?),
-            location_tags_dom_colors_tmp??,
-        )
-    };
-    let (mut location_tags, dominant_colors) = location_tags_dom_colors;
+    let (image_detections_tmp, location_tags_dom_colors_tmp) =
+        tokio::join!(detections_fut, location_tags_dom_colors_fut);
+    let (mut location_tags, dominant_colors) = location_tags_dom_colors_tmp??;
+    let image_detections = image_detections_tmp?;
 
     let additional_categories =
         evaluate_image_into_location_tags(&dominant_colors, &image_detections);
@@ -314,7 +306,6 @@ pub async fn image_flow_evaluation_impl(
     Ok(ImageFlowEvaluation {
         location_tags,
         image_detections,
-        depth_detction: depth_map,
     })
 }
 
@@ -322,15 +313,10 @@ pub async fn image_flow_evaluation_impl(
 impl ImageFlowEvaluation {
     #[uniffi::constructor]
     #[must_use]
-    pub fn new(
-        location_tags: UniqueLocationTags,
-        image_detections: ImageDetections,
-        depth_map: Option<Arc<DepthMap>>,
-    ) -> Self {
+    pub const fn new(location_tags: UniqueLocationTags, image_detections: ImageDetections) -> Self {
         Self {
             location_tags,
             image_detections,
-            depth_detction: depth_map.map(Arc::unwrap_or_clone),
         }
     }
 
@@ -356,13 +342,6 @@ impl ImageFlowEvaluation {
     pub fn image_detections(&self) -> ImageDetections {
         self.image_detections
             .clone()
-    }
-
-    #[must_use]
-    pub fn depth_map(&self) -> Option<Arc<DepthMap>> {
-        self.depth_detction
-            .clone()
-            .map(Arc::new)
     }
 }
 
@@ -494,6 +473,7 @@ mod test {
                 .to_str()
                 .unwrap(),
             model,
+            true,
         )
         .await
         .unwrap();

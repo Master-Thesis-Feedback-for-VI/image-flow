@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use ultralytics_inference::Results as DetectionResults;
 
+use crate::image::depth::DepthMap;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, uniffi::Enum, Eq, PartialOrd, Ord)]
 pub enum DetectionType {
     Bench,
@@ -51,11 +53,21 @@ pub struct BoundingBox {
     y2: f32,
 }
 
+impl BoundingBox {
+    fn depth_at_center(self, depth_map: &DepthMap) -> Option<f32> {
+        let x = f32::midpoint(self.x1, self.x2).floor() as u32;
+        let y = f32::midpoint(self.y1, self.y2).floor() as u32;
+
+        depth_map.depth_at(x, y)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, uniffi::Record)]
 pub struct Detection {
     confidence: f32,
     pub(crate) name: DetectionType,
     xyxy: BoundingBox,
+    distance: Option<f32>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, uniffi::Record)]
@@ -72,7 +84,7 @@ impl ImageDetections {
     }
 
     #[instrument]
-    pub fn from_detection_result(res: &DetectionResults) -> Self {
+    pub fn from_detection_result(res: &DetectionResults, depth_map: Option<&DepthMap>) -> Self {
         let mut detections = Vec::new();
 
         if let Some(boxes) = &res.boxes {
@@ -97,6 +109,7 @@ impl ImageDetections {
                     name: DetectionType::from_str(name),
                     confidence: conf,
                     xyxy,
+                    distance: depth_map.and_then(|map| xyxy.depth_at_center(map)),
                 };
                 detections.push(detection);
             }
@@ -155,7 +168,7 @@ impl Display for ImageDetections {
 
 impl From<DetectionResults> for ImageDetections {
     fn from(value: DetectionResults) -> Self {
-        Self::from_detection_result(&value)
+        Self::from_detection_result(&value, None)
     }
 }
 
@@ -180,5 +193,29 @@ impl Extend<Detection> for ImageDetections {
     fn extend<T: IntoIterator<Item = Detection>>(&mut self, iter: T) {
         self.detections
             .extend(iter);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ndarray::Array2;
+    use ultralytics_inference::DepthMap as UltralyticsDepthMap;
+
+    use super::BoundingBox;
+    use crate::image::depth::DepthMap;
+
+    #[test]
+    fn depth_at_center_uses_x_as_column_and_y_as_row() {
+        let mut pixels = Array2::zeros((5, 3));
+        pixels[(4, 1)] = 2.5;
+        let depth_map = DepthMap::from(UltralyticsDepthMap::new(pixels, (5, 3)));
+        let box_at_bottom = BoundingBox {
+            x1: 0.0,
+            x2: 2.0,
+            y1: 4.0,
+            y2: 5.0,
+        };
+
+        assert_eq!(box_at_bottom.depth_at_center(&depth_map), Some(2.5));
     }
 }

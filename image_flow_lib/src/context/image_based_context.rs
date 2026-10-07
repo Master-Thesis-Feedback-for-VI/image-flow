@@ -216,26 +216,44 @@ impl ImageRecognizer {
     /// The API from Ulatralytics is weird here. Per image 1 Results struct is created containing
     /// all Results and detections from one image. So having multiple makes no sense and there
     /// always only exists one Results even if nothing is detected!
-    pub async fn predict_objects(&self, path: impl AsRef<Path>) -> crate::Result<ImageDetections> {
-        let path = path
+    pub async fn predict_objects(
+        &self,
+        path: impl AsRef<Path>,
+        include_depth: bool,
+    ) -> crate::Result<ImageDetections> {
+        let path_to_pred = path
             .as_ref()
             .to_path_buf();
         let obj_detection_model = Arc::clone(&self.obj_detection);
 
-        let mut predictions =
+        let object_prediction_fut =
             tokio::task::spawn_blocking(move || -> crate::Result<Vec<DetectionResults>> {
                 let predictions = obj_detection_model
                     .model
                     .blocking_lock()
-                    .predict(path)?;
+                    .predict(path_to_pred)?;
 
                 Ok(predictions)
-            })
-            .await??;
-        assert_eq!(predictions.len(), 1);
+            });
 
-        let result = predictions.remove(0);
-        let image_detections = ImageDetections::from(result);
+        let image_detections = if include_depth {
+            let depth_pred_fut = self.predict_depth(&path);
+
+            let (object_prediction, depth_pred) =
+                tokio::join!(object_prediction_fut, depth_pred_fut);
+            let mut object_prediction = object_prediction??;
+            assert_eq!(object_prediction.len(), 1);
+            let result = object_prediction.remove(0);
+            let depth_pred = depth_pred?;
+
+            ImageDetections::from_detection_result(&result, Some(&depth_pred))
+        } else {
+            let mut object_prediction = object_prediction_fut.await??;
+            assert_eq!(object_prediction.len(), 1);
+
+            let result = object_prediction.remove(0);
+            ImageDetections::from(result)
+        };
 
         Ok(image_detections)
     }
