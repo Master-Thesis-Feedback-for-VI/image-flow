@@ -216,11 +216,7 @@ impl ImageRecognizer {
     /// The API from Ulatralytics is weird here. Per image 1 Results struct is created containing
     /// all Results and detections from one image. So having multiple makes no sense and there
     /// always only exists one Results even if nothing is detected!
-    pub async fn predict_objects(
-        &self,
-        path: impl AsRef<Path>,
-        include_depth: bool,
-    ) -> crate::Result<ImageDetections> {
+    pub async fn predict_objects(&self, path: impl AsRef<Path>) -> crate::Result<ImageDetections> {
         let path_to_pred = path
             .as_ref()
             .to_path_buf();
@@ -236,25 +232,15 @@ impl ImageRecognizer {
                 Ok(predictions)
             });
 
-        let image_detections = if include_depth {
-            let depth_pred_fut = self.predict_depth(&path);
+        let depth_pred_fut = self.predict_depth(&path);
 
-            let (object_prediction, depth_pred) =
-                tokio::join!(object_prediction_fut, depth_pred_fut);
-            let mut object_prediction = object_prediction??;
-            assert_eq!(object_prediction.len(), 1);
-            let result = object_prediction.remove(0);
-            let depth_pred = depth_pred?;
+        let (object_prediction, depth_pred) = tokio::join!(object_prediction_fut, depth_pred_fut);
+        let mut object_prediction = object_prediction??;
+        assert_eq!(object_prediction.len(), 1);
+        let result = object_prediction.remove(0);
+        let depth_pred = depth_pred?;
 
-            ImageDetections::from_detection_result(&result, Some(&depth_pred))
-        } else {
-            let mut object_prediction = object_prediction_fut.await??;
-            assert_eq!(object_prediction.len(), 1);
-
-            let result = object_prediction.remove(0);
-            ImageDetections::from(result)
-        };
-
+        let image_detections = ImageDetections::from_detection_result(&result, &depth_pred);
         Ok(image_detections)
     }
 

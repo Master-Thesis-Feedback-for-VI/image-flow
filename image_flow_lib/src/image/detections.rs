@@ -54,11 +54,13 @@ pub struct BoundingBox {
 }
 
 impl BoundingBox {
-    fn depth_at_center(self, depth_map: &DepthMap) -> Option<f32> {
+    fn depth_at_center(self, depth_map: &DepthMap) -> f32 {
         let x = f32::midpoint(self.x1, self.x2).floor() as u32;
         let y = f32::midpoint(self.y1, self.y2).floor() as u32;
 
-        depth_map.depth_at(x, y)
+        depth_map
+            .depth_at(x, y)
+            .expect("This in theory should not be possible")
     }
 }
 
@@ -67,7 +69,7 @@ pub struct Detection {
     confidence: f32,
     pub(crate) name: DetectionType,
     xyxy: BoundingBox,
-    distance: Option<f32>,
+    distance: f32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, uniffi::Record)]
@@ -84,7 +86,7 @@ impl ImageDetections {
     }
 
     #[instrument]
-    pub fn from_detection_result(res: &DetectionResults, depth_map: Option<&DepthMap>) -> Self {
+    pub fn from_detection_result(res: &DetectionResults, depth_map: &DepthMap) -> Self {
         let mut detections = Vec::new();
 
         if let Some(boxes) = &res.boxes {
@@ -109,7 +111,7 @@ impl ImageDetections {
                     name: DetectionType::from_str(name),
                     confidence: conf,
                     xyxy,
-                    distance: depth_map.and_then(|map| xyxy.depth_at_center(map)),
+                    distance: xyxy.depth_at_center(depth_map),
                 };
                 detections.push(detection);
             }
@@ -166,12 +168,6 @@ impl Display for ImageDetections {
     }
 }
 
-impl From<DetectionResults> for ImageDetections {
-    fn from(value: DetectionResults) -> Self {
-        Self::from_detection_result(&value, None)
-    }
-}
-
 impl Deref for ImageDetections {
     type Target = Vec<Detection>;
 
@@ -216,6 +212,6 @@ mod tests {
             y2: 5.0,
         };
 
-        assert_eq!(box_at_bottom.depth_at_center(&depth_map), Some(2.5));
+        assert_eq!(box_at_bottom.depth_at_center(&depth_map), 2.5);
     }
 }

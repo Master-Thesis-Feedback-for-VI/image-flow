@@ -1,6 +1,6 @@
 ---
 source: image_flow_lib/src/lib.rs
-assertion_line: 463
+assertion_line: 429
 expression: evaluation
 ---
 ImageFlowEvaluation {
@@ -20,6 +20,7 @@ ImageFlowEvaluation {
                     y1: 117.06879,
                     y2: 356.12137,
                 },
+                distance: 2.6870804,
             },
             Detection {
                 confidence: 0.895866,
@@ -30,6 +31,7 @@ ImageFlowEvaluation {
                     y1: 82.13153,
                     y2: 221.9996,
                 },
+                distance: 3.826259,
             },
             Detection {
                 confidence: 0.88760823,
@@ -40,6 +42,7 @@ ImageFlowEvaluation {
                     y1: 79.54974,
                     y2: 354.46234,
                 },
+                distance: 1.8181367,
             },
             Detection {
                 confidence: 0.75334406,
@@ -50,6 +53,7 @@ ImageFlowEvaluation {
                     y1: 79.50333,
                     y2: 318.48083,
                 },
+                distance: 1.9430624,
             },
             Detection {
                 confidence: 0.63179934,
@@ -60,6 +64,7 @@ ImageFlowEvaluation {
                     y1: 60.654892,
                     y2: 108.53516,
                 },
+                distance: 3.7249236,
             },
             Detection {
                 confidence: 0.33652502,
@@ -70,6 +75,7 @@ ImageFlowEvaluation {
                     y1: 263.78076,
                     y2: 326.3703,
                 },
+                distance: 1.6106385,
             },
             Detection {
                 confidence: 0.30469653,
@@ -80,8 +86,8 @@ ImageFlowEvaluation {
                     y1: 264.3214,
                     y2: 356.54828,
                 },
+                distance: 1.6212219,
             },
         ],
     },
-    depth_detction: None,
 }

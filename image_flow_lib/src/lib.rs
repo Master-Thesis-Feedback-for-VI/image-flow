@@ -92,17 +92,10 @@ pub async fn image_flow_evaluation(
     img_path: &str,
     image_recognizer: Arc<ImageRecognizer>,
     amount: u32,
-    include_depth: bool,
 ) -> DefaultResult<ImageFlowEvaluation, ImageFlowError> {
-    let img_flow = image_flow_evaluation_impl(
-        location,
-        auth,
-        img_path,
-        &image_recognizer,
-        amount as usize,
-        include_depth,
-    )
-    .await?;
+    let img_flow =
+        image_flow_evaluation_impl(location, auth, img_path, &image_recognizer, amount as usize)
+            .await?;
 
     Ok(img_flow)
 }
@@ -113,10 +106,8 @@ pub async fn image_flow_evaluation(
 pub async fn recognize_objects_in_image(
     path: &str,
     image_recognizer: Arc<ImageRecognizer>,
-    include_depth: bool,
 ) -> DefaultResult<ImageDetections, ImageFlowError> {
-    let detections =
-        recognize_objects_in_image_impl(path, &image_recognizer, include_depth).await?;
+    let detections = recognize_objects_in_image_impl(path, &image_recognizer).await?;
 
     Ok(detections)
 }
@@ -204,7 +195,6 @@ impl Display for FilterLevel {
 pub async fn recognize_objects_in_image_impl(
     path: impl AsRef<Path>,
     image_recognizer: &ImageRecognizer,
-    include_depth: bool,
 ) -> crate::Result<ImageDetections> {
     let path = path.as_ref();
     if !path.exists() {
@@ -213,7 +203,7 @@ pub async fn recognize_objects_in_image_impl(
     }
 
     image_recognizer
-        .predict_objects(path, include_depth)
+        .predict_objects(path)
         .await
 }
 
@@ -265,7 +255,6 @@ pub async fn image_flow_evaluation_impl(
     img_path: impl AsRef<Path>,
     image_recognizer: &ImageRecognizer,
     amount: usize,
-    include_depth: bool,
 ) -> crate::Result<ImageFlowEvaluation> {
     let img_path = img_path
         .as_ref()
@@ -276,8 +265,7 @@ pub async fn image_flow_evaluation_impl(
         return Err(crate::error::file_does_not_exist(err_msg));
     }
 
-    let detections_fut =
-        recognize_objects_in_image_impl(&img_path, image_recognizer, include_depth);
+    let detections_fut = recognize_objects_in_image_impl(&img_path, image_recognizer);
 
     let send_img_path = img_path.clone();
     let location_tags_dom_colors_fut: JoinHandle<
@@ -434,7 +422,6 @@ mod test {
                 .unwrap(),
             model.clone(),
             amount,
-            true,
         )
         .await
         .unwrap();
@@ -450,7 +437,7 @@ mod test {
             .to_str()
             .unwrap();
 
-        let evaluation = image_flow_evaluation(location, auth, img_path, model, amount, true)
+        let evaluation = image_flow_evaluation(location, auth, img_path, model, amount)
             .await
             .unwrap();
 
@@ -473,7 +460,6 @@ mod test {
                 .to_str()
                 .unwrap(),
             model,
-            true,
         )
         .await
         .unwrap();
