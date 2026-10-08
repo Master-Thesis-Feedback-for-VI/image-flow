@@ -23,7 +23,7 @@ use zip::CompressionMethod;
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
-const FRAME_DIFF_DURATION_IN_MILIS: i64 = 200;
+const FRAME_DIFF_DURATION_IN_MILIS: i64 = 400;
 pub static AUTH_AGENT: LazyLock<Option<AuthToHost>> = LazyLock::new(|| {
     let user_name = option_env!("USER_AGENT_NAME");
     let passwd = option_env!("PASSWORD");

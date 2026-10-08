@@ -117,6 +117,7 @@ pipeline video_path csv_path tmp_out serialized_output:
         --output {{tmp_out}}
 
 [group('scripts')]
+[parallel]
 pipeline_all: clean_out pipeline_small pipeline_large pipeline_conti_alehop
 
 [group('scripts')]
