@@ -1,4 +1,4 @@
-use std::{clone, fmt::Display, ops::Deref};
+use std::{fmt::Display, ops::Deref};
 
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
@@ -64,10 +64,6 @@ impl BoundingBox {
             .expect("This in theory should not be possible")
     }
 
-    const fn intersects(self, other: Self) -> bool {
-        self.x1 <= other.x2 && self.x2 >= other.x1 && self.y1 <= other.y2 && self.y2 >= other.y1
-    }
-
     const fn join(self, other: Self) -> Self {
         Self {
             x1: self
@@ -83,6 +79,68 @@ impl BoundingBox {
                 .y2
                 .max(other.y2),
         }
+    }
+
+    #[must_use]
+    pub const fn intersects(self, other: Self) -> bool {
+        self.x1 <= other.x2 && self.x2 >= other.x1 && self.y1 <= other.y2 && self.y2 >= other.y1
+    }
+
+    #[must_use]
+    pub const fn width(self) -> f32 {
+        (self.x2 - self.x1).max(0.0)
+    }
+
+    #[must_use]
+    pub const fn height(self) -> f32 {
+        (self.y2 - self.y1).max(0.0)
+    }
+
+    #[must_use]
+    pub const fn area(self) -> f32 {
+        self.width() * self.height()
+    }
+
+    #[must_use]
+    pub const fn intersection_area(self, other: Self) -> f32 {
+        let width = (self
+            .x2
+            .min(other.x2)
+            - self
+                .x1
+                .max(other.x1))
+        .max(0.0);
+        let height = (self
+            .y2
+            .min(other.y2)
+            - self
+                .y1
+                .max(other.y1))
+        .max(0.0);
+
+        width * height
+    }
+
+    #[must_use]
+    pub const fn union_area(self, other: Self) -> f32 {
+        self.area() + other.area() - self.intersection_area(other)
+    }
+
+    #[must_use]
+    pub const fn iou(self, other: Self) -> f32 {
+        let intersection = self.intersection_area(other);
+        let union = self.union_area(other);
+
+        if union <= 0.0 {
+            return 0.0;
+        }
+
+        intersection / union
+    }
+
+    #[must_use]
+    pub const fn is_similar_bb(self, other: Self, threshold: f32) -> bool {
+        self.iou(other) >= threshold
     }
 }
 
@@ -156,7 +214,8 @@ impl ImageDetections {
             }
         }
 
-        detections = Self::cyclist_merge(&detections);
+        detections = Self::cyclist_merge(detections);
+        detections = Self::remove_similar_bb(detections);
 
         Self { detections }
     }
@@ -186,15 +245,15 @@ impl ImageDetections {
         self.detections
     }
 
-    fn cyclist_merge(detections: &[Detection]) -> Vec<Detection> {
-        let mut collector = Vec::with_capacity(detections.len());
+    fn cyclist_merge<I>(detections: I) -> Vec<Detection>
+    where
+        I: IntoIterator<Item = Detection>,
+    {
+        let mut collector = Vec::new();
         let mut bicycles = Vec::new();
         let mut persons = Vec::new();
 
-        for detection in detections
-            .iter()
-            .cloned()
-        {
+        for detection in detections {
             match detection.name {
                 DetectionType::Bicycle => bicycles.push(detection),
                 DetectionType::Person => persons.push(detection),
@@ -230,6 +289,31 @@ impl ImageDetections {
         collector.extend(bicycle_riders);
 
         collector
+    }
+
+    fn remove_similar_bb<I>(detections: I) -> Vec<Detection>
+    where
+        I: IntoIterator<Item = Detection>,
+    {
+        const IOU_THRESHOLD: f32 = 0.9;
+
+        let mut result: Vec<Detection> = Vec::new();
+        for detection in detections {
+            let is_duplicate = result
+                .iter()
+                .any(|existing| {
+                    existing
+                        .xyxy
+                        .is_similar_bb(detection.xyxy, IOU_THRESHOLD)
+                        && existing.name == detection.name
+                });
+
+            if !is_duplicate {
+                result.push(detection);
+            }
+        }
+
+        result
     }
 }
 
