@@ -105,7 +105,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut unique_geo_cat_collection: Vec<ImageFlowEvaluationForRecording> = Vec::new();
     for (location, frame) in zipped.iter() {
         let auth = AUTH_AGENT.clone();
-        let evaluation = image_flow_evaluation_impl(*location, auth, frame, &model, 4, true).await;
+        let evaluation = image_flow_evaluation_impl(*location, auth, frame, &model, 4).await;
 
         match evaluation {
             Ok(eva) => {

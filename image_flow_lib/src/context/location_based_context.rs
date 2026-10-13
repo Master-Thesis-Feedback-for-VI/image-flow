@@ -126,8 +126,7 @@ impl LocationTag {
                 categories.insert(Self::Outside);
                 categories.insert(Self::Forest);
             }
-            "pedestrian" => {
-                categories.insert(Self::Outside);
+            "pedestrian" | "service" => {
                 categories.insert(Self::Pedestrian);
             }
             "bicycle_parking" | "platform" => {
@@ -140,6 +139,7 @@ impl LocationTag {
             | "residential" | "living_street" => {
                 categories.insert(Self::Street);
             }
+            "bench" => {}
             _ => {
                 #[cfg(debug_assertions)]
                 {

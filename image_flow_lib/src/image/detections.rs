@@ -20,6 +20,7 @@ pub enum DetectionType {
     TrafficLight,
     Tv,
     Keyboard,
+    Cyclist,
 
     Unknown(String),
 }
@@ -62,14 +63,110 @@ impl BoundingBox {
             .depth_at(x, y)
             .expect("This in theory should not be possible")
     }
+
+    const fn join(self, other: Self) -> Self {
+        Self {
+            x1: self
+                .x1
+                .min(other.x1),
+            x2: self
+                .x2
+                .max(other.x2),
+            y1: self
+                .y1
+                .min(other.y1),
+            y2: self
+                .y2
+                .max(other.y2),
+        }
+    }
+
+    #[must_use]
+    pub const fn intersects(self, other: Self) -> bool {
+        self.x1 <= other.x2 && self.x2 >= other.x1 && self.y1 <= other.y2 && self.y2 >= other.y1
+    }
+
+    #[must_use]
+    pub const fn width(self) -> f32 {
+        (self.x2 - self.x1).max(0.0)
+    }
+
+    #[must_use]
+    pub const fn height(self) -> f32 {
+        (self.y2 - self.y1).max(0.0)
+    }
+
+    #[must_use]
+    pub const fn area(self) -> f32 {
+        self.width() * self.height()
+    }
+
+    #[must_use]
+    pub const fn intersection_area(self, other: Self) -> f32 {
+        let width = (self
+            .x2
+            .min(other.x2)
+            - self
+                .x1
+                .max(other.x1))
+        .max(0.0);
+        let height = (self
+            .y2
+            .min(other.y2)
+            - self
+                .y1
+                .max(other.y1))
+        .max(0.0);
+
+        width * height
+    }
+
+    #[must_use]
+    pub const fn union_area(self, other: Self) -> f32 {
+        self.area() + other.area() - self.intersection_area(other)
+    }
+
+    #[must_use]
+    pub const fn iou(self, other: Self) -> f32 {
+        let intersection = self.intersection_area(other);
+        let union = self.union_area(other);
+
+        if union <= 0.0 {
+            return 0.0;
+        }
+
+        intersection / union
+    }
+
+    #[must_use]
+    pub const fn is_similar_bb(self, other: Self, threshold: f32) -> bool {
+        self.iou(other) >= threshold
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, uniffi::Record)]
 pub struct Detection {
-    confidence: f32,
     pub(crate) name: DetectionType,
     xyxy: BoundingBox,
     distance: f32,
+    confidence: f32,
+}
+
+impl Detection {
+    const fn join_detections(det1: &Self, det2: &Self, new_detection_type: DetectionType) -> Self {
+        let joined_bb = det1
+            .xyxy
+            .join(det2.xyxy);
+
+        let conf_average = f32::midpoint(det1.confidence, det2.confidence);
+        let distance_average = f32::midpoint(det1.distance, det2.distance);
+        Self {
+            confidence: conf_average,
+            name: new_detection_type,
+            xyxy: joined_bb,
+            distance: distance_average,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, uniffi::Record)]
@@ -117,6 +214,9 @@ impl ImageDetections {
             }
         }
 
+        detections = Self::cyclist_merge(detections);
+        detections = Self::remove_similar_bb(detections);
+
         Self { detections }
     }
 
@@ -143,6 +243,77 @@ impl ImageDetections {
     #[must_use]
     pub fn into_inner(self) -> Vec<Detection> {
         self.detections
+    }
+
+    fn cyclist_merge<I>(detections: I) -> Vec<Detection>
+    where
+        I: IntoIterator<Item = Detection>,
+    {
+        let mut collector = Vec::new();
+        let mut bicycles = Vec::new();
+        let mut persons = Vec::new();
+
+        for detection in detections {
+            match detection.name {
+                DetectionType::Bicycle => bicycles.push(detection),
+                DetectionType::Person => persons.push(detection),
+                _ => collector.push(detection),
+            }
+        }
+
+        let mut bicycle_riders = Vec::new();
+        bicycles.retain(|bicycle| {
+            let person_idx = persons
+                .iter()
+                .position(|person| {
+                    bicycle
+                        .xyxy
+                        .intersects(person.xyxy)
+                });
+
+            person_idx.is_none_or(|idx| {
+                let person = persons.remove(idx);
+
+                bicycle_riders.push(Detection::join_detections(
+                    bicycle,
+                    &person,
+                    DetectionType::Cyclist,
+                ));
+
+                false
+            })
+        });
+
+        collector.extend(bicycles);
+        collector.extend(persons);
+        collector.extend(bicycle_riders);
+
+        collector
+    }
+
+    fn remove_similar_bb<I>(detections: I) -> Vec<Detection>
+    where
+        I: IntoIterator<Item = Detection>,
+    {
+        const IOU_THRESHOLD: f32 = 0.9;
+
+        let mut result: Vec<Detection> = Vec::new();
+        for detection in detections {
+            let is_duplicate = result
+                .iter()
+                .any(|existing| {
+                    existing
+                        .xyxy
+                        .is_similar_bb(detection.xyxy, IOU_THRESHOLD)
+                        && existing.name == detection.name
+                });
+
+            if !is_duplicate {
+                result.push(detection);
+            }
+        }
+
+        result
     }
 }
 
