@@ -223,3 +223,90 @@ impl From<JoinError> for crate::Error {
         io(value)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_display_debug_and_source_preserve_context() {
+        let error = io(std::io::Error::other("disk unavailable"));
+        assert_eq!(error.to_string(), "I/O error: disk unavailable");
+        assert_eq!(
+            error
+                .source()
+                .expect("source error")
+                .to_string(),
+            "disk unavailable"
+        );
+        assert!(format!("{error:?}").contains("Io"));
+        let without_source = Error::new::<std::io::Error>(Kind::Io, None);
+        assert_eq!(without_source.to_string(), "I/O error");
+        assert!(
+            without_source
+                .source()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn ffi_errors_preserve_each_error_category_and_message() {
+        for (error, kind) in [
+            (request("fixture"), "request"),
+            (serialization("fixture"), "serialization"),
+            (io("fixture"), "io"),
+            (image("fixture"), "image"),
+            (file_does_not_exist("fixture"), "io"),
+        ] {
+            let expected_message = error.to_string();
+            let ffi = ImageFlowError::from(error);
+            let (actual_kind, message) = match ffi {
+                ImageFlowError::Request { message } => ("request", message),
+                ImageFlowError::Serialization { message } => ("serialization", message),
+                ImageFlowError::Io { message } => ("io", message),
+                ImageFlowError::Image { message } => ("image", message),
+                #[cfg(feature = "video")]
+                ImageFlowError::Ffmpeg { .. } => panic!("unexpected FFmpeg category"),
+            };
+            assert_eq!(actual_kind, kind);
+            assert_eq!(message, expected_message);
+        }
+    }
+
+    #[test]
+    fn standard_io_and_json_errors_convert_to_correct_categories() {
+        let error: Error = std::io::Error::other("fixture").into();
+        assert!(matches!(
+            ImageFlowError::from(error),
+            ImageFlowError::Io { .. }
+        ));
+        let error: Error = serde_json::from_str::<serde_json::Value>("bad")
+            .expect_err("invalid JSON")
+            .into();
+        assert!(matches!(
+            ImageFlowError::from(error),
+            ImageFlowError::Serialization { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn task_panics_convert_to_io_errors() {
+        let join_error = tokio::spawn(async { panic!("fixture panic") })
+            .await
+            .expect_err("panicked task");
+        assert!(matches!(
+            ImageFlowError::from(Error::from(join_error)),
+            ImageFlowError::Io { .. }
+        ));
+    }
+
+    #[cfg(feature = "video")]
+    #[test]
+    fn ffmpeg_errors_preserve_category() {
+        let error: Error = ffmpeg_next::Error::StreamNotFound.into();
+        assert!(matches!(
+            ImageFlowError::from(error),
+            ImageFlowError::Ffmpeg { .. }
+        ));
+    }
+}

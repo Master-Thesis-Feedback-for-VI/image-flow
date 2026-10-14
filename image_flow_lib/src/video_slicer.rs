@@ -266,9 +266,21 @@ fn pts_to_duration(pts: i64, time_base: ffmpeg::Rational) -> Duration {
 }
 
 fn save_png(frame: &Video, path: impl AsRef<Path>) -> crate::Result<()> {
+    // FFmpeg aligns each row, while the image encoder expects tightly packed RGB.
+    let row_bytes = frame.width() as usize * 3;
+    let pixels: Vec<u8> = frame
+        .data(0)
+        .chunks(frame.stride(0))
+        .take(frame.height() as usize)
+        .flat_map(|row| {
+            row[..row_bytes]
+                .iter()
+                .copied()
+        })
+        .collect();
     image::save_buffer(
         path,
-        frame.data(0),
+        &pixels,
         frame.width(),
         frame.height(),
         ColorType::Rgb8,
@@ -370,6 +382,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[ignore = "decodes large sample recordings and writes frames to out/"]
     async fn fetch_images() {
         let errors: Vec<String> = futures::future::join_all(
             SAMPLE_VIDEO_SOURCES
@@ -382,6 +395,268 @@ mod test {
         .collect();
 
         assert!(errors.is_empty(), "failures:\n{}", errors.join("\n"));
+    }
+
+    #[test]
+    fn pts_conversion_handles_fractional_negative_and_saturating_values() {
+        use ffmpeg_next::Rational;
+        assert_eq!(super::pts_to_duration(0, Rational(1, 30)), Duration::zero());
+        assert_eq!(
+            super::pts_to_duration(15, Rational(1, 30)),
+            Duration::milliseconds(500)
+        );
+        assert_eq!(
+            super::pts_to_duration(-15, Rational(1, 30)),
+            Duration::milliseconds(-500)
+        );
+        assert_eq!(
+            super::pts_to_duration(90_000, Rational(1, 90_000)),
+            Duration::seconds(1)
+        );
+        assert_eq!(
+            super::pts_to_duration(i64::MAX, Rational(i32::MAX, 1)),
+            Duration::nanoseconds(i64::MAX)
+        );
+        assert_eq!(
+            super::pts_to_duration(i64::MIN, Rational(i32::MAX, 1)),
+            Duration::nanoseconds(i64::MIN)
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_video_emits_one_error_and_finishes_stream() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let frames = super::export_images_from_video(
+            dir.path()
+                .join("missing.mov"),
+            dir.path()
+                .join("frames"),
+            Duration::seconds(1),
+        );
+        let results = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            frames.collect::<Vec<_>>(),
+        )
+        .await
+        .expect("stream must terminate");
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_err());
+    }
+
+    #[tokio::test]
+    async fn invalid_frame_storage_emits_error_and_finishes_stream() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let file = dir
+            .path()
+            .join("not-a-directory");
+        std::fs::write(&file, b"fixture").expect("write fixture");
+        let frames = super::export_images_from_video(
+            dir.path()
+                .join("missing.mov"),
+            file,
+            Duration::seconds(1),
+        );
+        let results = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            frames.collect::<Vec<_>>(),
+        )
+        .await
+        .expect("stream must terminate");
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_err());
+    }
+
+    #[tokio::test]
+    async fn video_metadata_rejects_missing_file() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        assert!(
+            super::VideoMetadata::open(
+                dir.path()
+                    .join("missing.mov")
+            )
+            .await
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn zip_can_preserve_all_frames_on_drop() {
+        use crate::{FramePath, location::coordinate_system::Coordinate};
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir
+            .path()
+            .join("frame.png");
+        std::fs::write(&path, b"fixture").expect("write frame");
+        let mut zipped = super::ImageGPSZip {
+            zipped_content: vec![(
+                Coordinate { lat: 1.0, lon: 2.0 },
+                FramePath::new_impl(Duration::zero(), &path),
+            )],
+        };
+        assert_eq!(zipped.len(), 1);
+        zipped.do_not_remove_frames();
+        assert!(
+            !zipped[0]
+                .1
+                .should_drop
+        );
+        drop(zipped);
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn png_export_ignores_ffmpeg_row_padding() {
+        use ffmpeg_next::{format::Pixel, frame::Video};
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir
+            .path()
+            .join("frame.png");
+        let mut frame = Video::new(Pixel::RGB24, 3, 2);
+        let stride = frame.stride(0);
+        frame
+            .data_mut(0)
+            .fill(0);
+        frame.data_mut(0)[..9].copy_from_slice(&[255, 0, 0, 255, 0, 0, 255, 0, 0]);
+        frame.data_mut(0)[stride..stride + 9].copy_from_slice(&[0, 255, 0, 0, 255, 0, 0, 255, 0]);
+        super::save_png(&frame, &path).expect("save RGB frame");
+        let image = image::open(path)
+            .expect("read PNG")
+            .to_rgb8();
+        assert_eq!(image.dimensions(), (3, 2));
+        for x in 0..3 {
+            assert_eq!(
+                image
+                    .get_pixel(x, 0)
+                    .0,
+                [255, 0, 0]
+            );
+            assert_eq!(
+                image
+                    .get_pixel(x, 1)
+                    .0,
+                [0, 255, 0]
+            );
+        }
+    }
+
+    fn tiny_video(path: &Path) {
+        // Three uncompressed 4x2 YUV frames at 2 FPS, generated entirely in memory.
+        let mut bytes = b"YUV4MPEG2 W4 H2 F2:1 Ip A1:1 C444\n".to_vec();
+        for _ in 0..3 {
+            bytes.extend_from_slice(b"FRAME\n");
+            bytes.extend_from_slice(&[128; 24]);
+        }
+        std::fs::write(path, bytes).expect("write tiny video");
+    }
+
+    #[tokio::test]
+    async fn tiny_video_exports_timestamped_readable_frames_and_cleans_them_up() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let video = dir
+            .path()
+            .join("tiny.y4m");
+        tiny_video(&video);
+        let frames = super::export_images_from_video(
+            &video,
+            dir.path()
+                .join("frames"),
+            Duration::milliseconds(500),
+        );
+        let frames = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            frames.collect::<Vec<_>>(),
+        )
+        .await
+        .expect("decode timeout");
+        let frames: Vec<_> = frames
+            .into_iter()
+            .collect::<crate::Result<_>>()
+            .expect("decode tiny video");
+        assert_eq!(frames.len(), 3);
+        let mut paths = Vec::new();
+        for (index, frame) in frames
+            .iter()
+            .enumerate()
+        {
+            assert_eq!(
+                frame.time_offset_from_first_frame,
+                Duration::milliseconds(i64::try_from(index).expect("small frame index") * 500)
+            );
+            assert_eq!(
+                image::open(frame)
+                    .expect("decode PNG")
+                    .to_rgb8()
+                    .dimensions(),
+                (4, 2)
+            );
+            paths.push(
+                frame
+                    .as_ref()
+                    .to_path_buf(),
+            );
+        }
+        drop(frames);
+        assert!(
+            paths
+                .iter()
+                .all(|path| !path.exists())
+        );
+    }
+
+    #[tokio::test]
+    async fn tiny_video_gps_zip_keeps_matches_and_removes_unmatched_frames() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let video = dir
+            .path()
+            .join("tiny.y4m");
+        let storage = dir
+            .path()
+            .join("frames");
+        tiny_video(&video);
+        let gps = crate::location::tabular_gps::DataPointsGPS::from_csv(
+            b"timestamp,latitude,longitude\n100,52.5,9.25\n101,53.5,10.25\n".as_slice(),
+        )
+        .expect("parse fixture GPS");
+        let zipped = super::ImageGPSZip::from_video_and_gps(
+            &video,
+            &gps,
+            &storage,
+            Duration::milliseconds(500),
+        )
+        .await
+        .expect("zip tiny video and GPS");
+        assert_eq!(zipped.len(), 2);
+        assert_eq!(
+            zipped[0]
+                .0
+                .lat,
+            52.5
+        );
+        assert_eq!(
+            zipped[1]
+                .0
+                .lat,
+            53.5
+        );
+        assert_eq!(
+            zipped[1]
+                .1
+                .time_offset_from_first_frame,
+            Duration::seconds(1)
+        );
+        assert_eq!(
+            std::fs::read_dir(&storage)
+                .expect("read frames")
+                .count(),
+            2
+        );
+        drop(zipped);
+        assert_eq!(
+            std::fs::read_dir(&storage)
+                .expect("read frames")
+                .count(),
+            0
+        );
     }
 
     // #[tokio::test]

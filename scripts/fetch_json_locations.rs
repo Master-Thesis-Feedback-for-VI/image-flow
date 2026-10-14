@@ -76,20 +76,10 @@ pub(crate) async fn main() {
         let auth = auth
             .as_ref()
             .map(Arc::clone);
-        let mut raw = fetch_raw_nominatim_data(v, auth)
+        let raw = fetch_raw_nominatim_data(v, auth)
             .await
             .unwrap();
-        raw.as_object_mut()
-            .unwrap()
-            .insert("name_map".to_string(), k.into());
-        raw.as_object_mut()
-            .unwrap()
-            .insert(
-                "url_osm".to_string(),
-                v.print_location_url()
-                    .into(),
-            );
-        data.push(raw);
+        data.push(annotate_location(raw, k, v).expect("Nominatim must return an object"));
     }
     let data_write = json!(data);
 
@@ -109,4 +99,51 @@ pub(crate) async fn main() {
     fs::write(out_path, pretty)
         .await
         .unwrap();
+}
+
+fn annotate_location(
+    mut raw: serde_json::Value,
+    name: &str,
+    coordinate: Coordinate,
+) -> Result<serde_json::Value, &'static str> {
+    let object = raw
+        .as_object_mut()
+        .ok_or("Nominatim response is not an object")?;
+    object.insert("name_map".into(), name.into());
+    object.insert(
+        "url_osm".into(),
+        coordinate
+            .print_location_url()
+            .into(),
+    );
+    Ok(raw)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn annotation_preserves_response_fields_and_adds_name_and_location_link() {
+        let coordinate = Coordinate {
+            lat: -12.5,
+            lon: 9.25,
+        };
+        let response = json!({"class": "highway", "type": "primary", "name_map": "old"});
+        let annotated =
+            annotate_location(response, "Test road", coordinate).expect("annotate response");
+        assert_eq!(annotated["class"], "highway");
+        assert_eq!(annotated["type"], "primary");
+        assert_eq!(annotated["name_map"], "Test road");
+        assert_eq!(annotated["url_osm"], coordinate.print_location_url());
+    }
+
+    #[test]
+    fn annotation_rejects_non_object_responses() {
+        for response in [json!(null), json!([]), json!("error")] {
+            assert!(
+                annotate_location(response, "Test", Coordinate { lat: 0.0, lon: 0.0 }).is_err()
+            );
+        }
+    }
 }

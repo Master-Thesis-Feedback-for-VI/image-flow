@@ -368,7 +368,7 @@ mod tests {
     use ndarray::Array2;
     use ultralytics_inference::DepthMap as UltralyticsDepthMap;
 
-    use super::BoundingBox;
+    use super::*;
     use crate::image::depth::DepthMap;
 
     #[test]
@@ -384,5 +384,245 @@ mod tests {
         };
 
         assert_eq!(box_at_bottom.depth_at_center(&depth_map), 2.5);
+    }
+
+    fn bb(x1: f32, y1: f32, x2: f32, y2: f32) -> BoundingBox {
+        BoundingBox { x1, x2, y1, y2 }
+    }
+
+    fn detection(name: DetectionType, xyxy: BoundingBox) -> Detection {
+        Detection {
+            name,
+            xyxy,
+            distance: 2.0,
+            confidence: 0.5,
+        }
+    }
+
+    #[test]
+    fn detection_names_are_case_insensitive_and_unknown_names_are_preserved() {
+        for (name, expected) in [
+            ("PERSON", DetectionType::Person),
+            ("Traffic Light", DetectionType::TrafficLight),
+            ("car", DetectionType::Car),
+            ("bicycle", DetectionType::Bicycle),
+            ("bench", DetectionType::Bench),
+            ("chair", DetectionType::Chair),
+            ("dining table", DetectionType::DiningTable),
+            ("cup", DetectionType::Cup),
+            ("handbag", DetectionType::Handbag),
+            ("laptop", DetectionType::Laptop),
+            ("tv", DetectionType::Tv),
+            ("keyboard", DetectionType::Keyboard),
+            ("DOG", DetectionType::Unknown("dog".into())),
+        ] {
+            assert_eq!(DetectionType::from_str(name), expected);
+        }
+    }
+
+    #[test]
+    fn overlapping_boxes_have_symmetric_geometry_and_iou() {
+        let a = bb(0.0, 0.0, 4.0, 4.0);
+        let b = bb(2.0, 2.0, 6.0, 6.0);
+        assert_eq!(a.width(), 4.0);
+        assert_eq!(a.height(), 4.0);
+        assert_eq!(a.area(), 16.0);
+        assert_eq!(a.intersection_area(b), 4.0);
+        assert_eq!(a.union_area(b), 28.0);
+        assert!((a.iou(b) - 1.0 / 7.0).abs() < f32::EPSILON);
+        assert_eq!(a.iou(b), b.iou(a));
+        assert!(a.intersects(b) && b.intersects(a));
+        assert_eq!(a.iou(a), 1.0);
+        assert!(a.is_similar_bb(a, 1.0));
+        assert!(!a.is_similar_bb(b, 0.9));
+        let joined = a.join(b);
+        assert_eq!(
+            (joined.x1, joined.y1, joined.x2, joined.y2),
+            (0.0, 0.0, 6.0, 6.0)
+        );
+    }
+
+    #[test]
+    fn touching_disjoint_and_degenerate_boxes() {
+        let a = bb(0.0, 0.0, 2.0, 2.0);
+        for touching in [bb(2.0, 0.0, 4.0, 2.0), bb(2.0, 2.0, 4.0, 4.0)] {
+            assert!(a.intersects(touching));
+            assert_eq!(a.intersection_area(touching), 0.0);
+            assert_eq!(a.iou(touching), 0.0);
+        }
+        assert!(!a.intersects(bb(3.0, 3.0, 4.0, 4.0)));
+        for degenerate in [bb(0.0, 0.0, 0.0, 0.0), bb(3.0, 3.0, 1.0, 1.0)] {
+            assert_eq!(degenerate.area(), 0.0);
+            assert_eq!(degenerate.iou(degenerate), 0.0);
+        }
+    }
+
+    #[test]
+    fn cyclist_merge_combines_bounds_and_averages_confidence_and_distance() {
+        let bicycle = detection(DetectionType::Bicycle, bb(0.0, 2.0, 4.0, 6.0));
+        let mut person = detection(DetectionType::Person, bb(1.0, 0.0, 3.0, 4.0));
+        person.distance = 4.0;
+        person.confidence = 0.9;
+        let merged = ImageDetections::cyclist_merge([bicycle, person]);
+        assert_eq!(merged.len(), 1);
+        let cyclist = &merged[0];
+        assert_eq!(cyclist.name, DetectionType::Cyclist);
+        assert_eq!(cyclist.distance, 3.0);
+        assert!((cyclist.confidence - 0.7).abs() < f32::EPSILON);
+        assert_eq!(
+            (
+                cyclist
+                    .xyxy
+                    .x1,
+                cyclist
+                    .xyxy
+                    .y1,
+                cyclist
+                    .xyxy
+                    .x2,
+                cyclist
+                    .xyxy
+                    .y2
+            ),
+            (0.0, 0.0, 4.0, 6.0)
+        );
+    }
+
+    #[test]
+    fn cyclist_merge_consumes_each_person_once_and_preserves_unmatched_objects() {
+        let bounds = bb(0.0, 0.0, 2.0, 2.0);
+        let merged = ImageDetections::cyclist_merge([
+            detection(DetectionType::Person, bounds),
+            detection(DetectionType::Bicycle, bounds),
+            detection(DetectionType::Bicycle, bounds),
+            detection(DetectionType::Person, bb(10.0, 10.0, 12.0, 12.0)),
+            detection(DetectionType::Car, bounds),
+        ]);
+        assert_eq!(merged.len(), 4);
+        for kind in [
+            DetectionType::Cyclist,
+            DetectionType::Person,
+            DetectionType::Bicycle,
+            DetectionType::Car,
+        ] {
+            assert_eq!(
+                merged
+                    .iter()
+                    .filter(|d| d.name == kind)
+                    .count(),
+                1
+            );
+        }
+        assert!(ImageDetections::cyclist_merge([]).is_empty());
+    }
+
+    #[test]
+    fn deduplication_keeps_first_same_class_but_preserves_different_classes_and_boxes() {
+        let bounds = bb(0.0, 0.0, 10.0, 10.0);
+        let first = detection(DetectionType::Car, bounds);
+        let mut duplicate = first.clone();
+        duplicate.confidence = 0.9;
+        let result = ImageDetections::remove_similar_bb([
+            first,
+            duplicate,
+            detection(DetectionType::Person, bounds),
+            detection(DetectionType::Car, bb(5.0, 5.0, 15.0, 15.0)),
+        ]);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].confidence, 0.5);
+        assert!(ImageDetections::remove_similar_bb([]).is_empty());
+    }
+
+    #[test]
+    fn collection_filter_thresholds_iteration_and_json_round_trip() {
+        let mut collection = ImageDetections::new();
+        assert!(!collection.is_outside(&[]));
+        let bounds = bb(0.0, 0.0, 1.0, 1.0);
+        collection.extend([
+            detection(DetectionType::Car, bounds),
+            detection(DetectionType::Car, bounds),
+            detection(DetectionType::Person, bounds),
+        ]);
+        assert_eq!(
+            collection
+                .get_by_detected_object(DetectionType::Car)
+                .count(),
+            2
+        );
+        assert!(collection.is_outside(&[(DetectionType::Car, 2)]));
+        assert!(!collection.is_outside(&[(DetectionType::Car, 3)]));
+        assert!(collection.is_outside(&[(DetectionType::Car, 3), (DetectionType::Person, 1)]));
+        let json = serde_json::to_value(&collection).expect("serialize detections");
+        let restored: ImageDetections =
+            serde_json::from_value(json.clone()).expect("deserialize detections");
+        assert_eq!(
+            serde_json::to_value(&restored).expect("serialize restored detections"),
+            json
+        );
+        assert_eq!(
+            restored
+                .into_iter()
+                .count(),
+            3
+        );
+        assert_eq!(
+            collection
+                .into_inner()
+                .len(),
+            3
+        );
+        assert_eq!(
+            ImageDetections::new().to_string(),
+            "Amount of objects detected: 0\n"
+        );
+    }
+
+    #[test]
+    fn raw_model_results_convert_classes_boxes_confidence_depth_and_postprocessing() {
+        use ndarray::array;
+        use std::{collections::HashMap, sync::Arc};
+        use ultralytics_inference::Boxes;
+        let depth = DepthMap::from(UltralyticsDepthMap::new(
+            Array2::from_elem((4, 4), 2.5),
+            (4, 4),
+        ));
+        let mut results = crate::tests::empty_detection_result();
+        assert!(ImageDetections::from_detection_result(&results, &depth).is_empty());
+        results.names = Arc::new(HashMap::from([
+            (0, "person".into()),
+            (1, "bicycle".into()),
+            (2, "car".into()),
+        ]));
+        // Ultralytics rows: x1, y1, x2, y2, confidence, class ID.
+        results.boxes = Some(Boxes::new(
+            array![
+                [0.0, 0.0, 2.0, 2.0, 0.8, 0.0],
+                [0.0, 1.0, 2.0, 3.0, 0.6, 1.0],
+                [2.0, 2.0, 3.0, 3.0, 0.9, 2.0],
+                [2.0, 2.0, 3.0, 3.0, 0.7, 2.0],
+                [0.0, 0.0, 1.0, 1.0, 0.5, 99.0],
+            ],
+            (4, 4),
+        ));
+        let detections = ImageDetections::from_detection_result(&results, &depth);
+        assert_eq!(detections.len(), 3);
+        assert_eq!(
+            detections
+                .get_by_detected_object(DetectionType::Car)
+                .count(),
+            1
+        );
+        assert_eq!(
+            detections
+                .get_by_detected_object(DetectionType::Unknown("unknown".into()))
+                .count(),
+            1
+        );
+        let cyclist = detections
+            .get_by_detected_object(DetectionType::Cyclist)
+            .next()
+            .expect("merged cyclist");
+        assert_eq!(cyclist.distance, 2.5);
+        assert!((cyclist.confidence - 0.7).abs() < f32::EPSILON);
     }
 }

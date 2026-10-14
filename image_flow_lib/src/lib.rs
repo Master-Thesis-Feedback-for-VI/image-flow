@@ -399,6 +399,7 @@ mod test {
     };
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires live map services and ONNX models"]
     async fn image_flow_check() {
         let amount = DOMINANT_COLOR_AMOUNT as u32;
         let model = Arc::new(
@@ -445,6 +446,7 @@ mod test {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires ONNX models and sample images"]
     async fn recognize_objects_in_image_test() {
         let bushalte_img = fetch_img("bushalte.jpg").await;
 
@@ -468,6 +470,7 @@ mod test {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires live map services and sample images"]
     async fn recognize_location_tags_test() {
         let mhh_img = fetch_img("MHH.png").await;
         let location = mhh_img

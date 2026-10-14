@@ -376,21 +376,13 @@ impl ModelVariant {
     }
 
     fn build_urls(&self) -> (Url, Url) {
-        let mut url_obj = Self::base_url();
-        let mut url_depth = Self::base_url();
-
-        let obj_name = self.object_detection_model_name();
-        let depth_name = self.depth_detection_model_name();
-
-        url_obj
-            .path_segments_mut()
-            .expect("This cannot fail since the url is valid")
-            .push(obj_name);
-
-        url_depth
-            .path_segments_mut()
-            .expect("This cannot fail since the url is valid")
-            .push(depth_name);
+        let base_url = Self::base_url();
+        let url_obj = base_url
+            .join(self.object_detection_model_name())
+            .expect("The model filename is a valid relative URL");
+        let url_depth = base_url
+            .join(self.depth_detection_model_name())
+            .expect("The model filename is a valid relative URL");
 
         (url_obj, url_depth)
     }
@@ -439,6 +431,237 @@ impl Drop for FramePath {
     fn drop(&mut self) {
         if self.should_drop {
             let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tests::http::TestServer;
+
+    #[test]
+    fn every_model_url_uses_its_configured_filename() {
+        for variant in [
+            ModelVariant::Nano,
+            ModelVariant::Small,
+            ModelVariant::Medium,
+            ModelVariant::Large,
+            ModelVariant::XLarge,
+        ] {
+            let (object, depth) = variant.build_urls();
+            for (url, name) in [
+                (object, variant.object_detection_model_name()),
+                (depth, variant.depth_detection_model_name()),
+            ] {
+                assert_eq!(url.scheme(), "https");
+                assert_eq!(url.host_str(), Some("github.com"));
+                assert_eq!(
+                    url.as_str(),
+                    format!("https://github.com/ultralytics/assets/releases/download/v8.4.0/{name}")
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn recognizer_rejects_non_directory_before_downloading() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let file = dir
+            .path()
+            .join("file");
+        std::fs::write(&file, b"fixture").expect("write fixture");
+        for path in [
+            file,
+            dir.path()
+                .join("missing"),
+        ] {
+            assert!(matches!(
+                ImageFlowError::from(
+                    ImageRecognizer::new_impl(ModelVariant::Nano, path)
+                        .await
+                        .expect_err("invalid directory")
+                ),
+                ImageFlowError::Io { .. }
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn download_writes_exact_response_bytes() {
+        let mut server = TestServer::new("200 OK", "model bytes").await;
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir
+            .path()
+            .join("model.part");
+        ImageRecognizer::download_to(&path, Url::parse(&server.url).expect("fixture URL"))
+            .await
+            .expect("download model fixture");
+        assert_eq!(
+            tokio::fs::read(path)
+                .await
+                .expect("read download"),
+            b"model bytes"
+        );
+        assert!(
+            server
+                .request()
+                .await
+                .starts_with("GET / HTTP/1.1")
+        );
+    }
+
+    #[tokio::test]
+    async fn download_rejects_http_errors_without_creating_file() {
+        let mut server = TestServer::new("404 Not Found", "missing").await;
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir
+            .path()
+            .join("model.part");
+        let error =
+            ImageRecognizer::download_to(&path, Url::parse(&server.url).expect("fixture URL"))
+                .await
+                .expect_err("HTTP error");
+        assert!(matches!(
+            ImageFlowError::from(error),
+            ImageFlowError::Request { .. }
+        ));
+        assert!(!path.exists());
+        server
+            .request()
+            .await;
+    }
+
+    #[tokio::test]
+    async fn failed_empty_model_download_removes_partial_file() {
+        let mut server = TestServer::new("200 OK", "").await;
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir
+            .path()
+            .join("model.onnx");
+        let error =
+            ImageRecognizer::load_or_download(&path, Url::parse(&server.url).expect("fixture URL"))
+                .await
+                .expect_err("empty model download");
+        assert!(matches!(
+            ImageFlowError::from(error),
+            ImageFlowError::Io { .. }
+        ));
+        assert!(!path.exists());
+        assert!(
+            !path
+                .with_extension("part")
+                .exists()
+        );
+        server
+            .request()
+            .await;
+    }
+
+    #[tokio::test]
+    async fn download_accepts_chunked_response_without_content_length() {
+        let mut server = TestServer::raw_response(
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n5\r\nmodel\r\n6\r\n bytes\r\n0\r\n\r\n".into()
+        ).await;
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir
+            .path()
+            .join("model.part");
+        ImageRecognizer::download_to(&path, Url::parse(&server.url).expect("fixture URL"))
+            .await
+            .expect("chunked download");
+        assert_eq!(
+            tokio::fs::read(path)
+                .await
+                .expect("read download"),
+            b"model bytes"
+        );
+        server
+            .request()
+            .await;
+    }
+
+    #[tokio::test]
+    async fn truncated_model_download_is_rejected_and_partial_file_removed() {
+        let mut server = TestServer::raw_response(
+            "HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\nshort".into(),
+        )
+        .await;
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir
+            .path()
+            .join("model.onnx");
+        assert!(
+            ImageRecognizer::load_or_download(&path, Url::parse(&server.url).expect("fixture URL"))
+                .await
+                .is_err()
+        );
+        assert!(!path.exists());
+        assert!(
+            !path
+                .with_extension("part")
+                .exists()
+        );
+        server
+            .request()
+            .await;
+    }
+
+    #[test]
+    fn frame_path_converts_offset_and_removes_owned_file_on_drop() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir
+            .path()
+            .join("frame.png");
+        std::fs::write(&path, b"fixture").expect("write frame");
+        let frame = FramePath::new(
+            DefaultDuration::from_millis(400),
+            path.to_str()
+                .expect("UTF-8 path"),
+        );
+        assert_eq!(
+            frame.time_offset_from_first_frame,
+            Duration::milliseconds(400)
+        );
+        assert_eq!(frame.as_ref(), path);
+        assert!(frame.should_drop);
+        drop(frame);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn frame_path_can_preserve_file_and_tolerates_missing_file() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir
+            .path()
+            .join("frame.png");
+        std::fs::write(&path, b"fixture").expect("write frame");
+        let mut frame = FramePath::new_impl(Duration::zero(), &path);
+        frame.should_drop = false;
+        drop(frame);
+        assert!(path.exists());
+        drop(FramePath::new_impl(
+            Duration::zero(),
+            dir.path()
+                .join("missing.png"),
+        ));
+    }
+
+    #[test]
+    fn image_intersection_heuristic_has_strict_traffic_light_threshold() {
+        let colors: DominantColors = std::iter::empty().collect();
+        for count in [0, 8, 9] {
+            let detections: ImageDetections = serde_json::from_value(serde_json::json!({
+                "detections": (0..count).map(|_| serde_json::json!({
+                    "name": "TrafficLight", "xyxy": {"x1": 0, "x2": 1, "y1": 0, "y2": 1},
+                    "distance": 1, "confidence": 0.9
+                })).collect::<Vec<_>>()
+            }))
+            .expect("fixture detections");
+            let tags = evaluate_image_into_location_tags(&colors, &detections);
+            assert_eq!(tags.contains(LocationTag::Intersection), count > 8);
+            assert_eq!(tags.contains(LocationTag::Outside), count > 8);
+            assert!(!tags.contains(LocationTag::Forest));
         }
     }
 }

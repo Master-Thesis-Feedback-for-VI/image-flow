@@ -261,6 +261,7 @@ mod test {
     };
 
     #[tokio::test]
+    #[ignore = "requires live map services"]
     async fn check_all_available_types() {
         let auth_agent = AUTH_AGENT
             .clone()
@@ -284,6 +285,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[ignore = "requires live map services"]
     async fn apartment() {
         let auth_agent = AUTH_AGENT
             .clone()
@@ -338,6 +340,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[ignore = "requires live map services"]
     async fn karl_wichert_allee() {
         let auth_agent = AUTH_AGENT
             .clone()
@@ -388,6 +391,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[ignore = "requires live map services"]
     async fn intersections_test() {
         let auth_agent = AUTH_AGENT
             .clone()
@@ -426,6 +430,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[ignore = "requires live map services and sample images"]
     async fn check_inside_building() {
         let auth = AUTH_AGENT
             .clone()
@@ -435,5 +440,87 @@ mod test {
         let tags = LocationTag::extract_categories_from_overpass(luetzeken, auth).await;
 
         assert!(tags.contains(LocationTag::Inside));
+    }
+
+    #[tokio::test]
+    async fn nominatim_types_and_classes_map_to_expected_tags_without_live_services() {
+        use crate::tests::http::TestServer;
+        for (kind, class, expected) in [
+            ("elevator", "amenity", vec![LocationTag::Elevator]),
+            ("apartments", "building", vec![LocationTag::Inside]),
+            ("library", "amenity", vec![LocationTag::Inside]),
+            ("cafe", "amenity", vec![LocationTag::Inside]),
+            ("pub", "amenity", vec![LocationTag::Inside]),
+            ("house", "building", vec![LocationTag::Inside]),
+            ("university", "amenity", vec![LocationTag::Inside]),
+            ("hospital", "amenity", vec![LocationTag::Inside]),
+            (
+                "track",
+                "highway",
+                vec![
+                    LocationTag::Forest,
+                    LocationTag::Outside,
+                    LocationTag::Street,
+                ],
+            ),
+            (
+                "pedestrian",
+                "highway",
+                vec![LocationTag::Pedestrian, LocationTag::Street],
+            ),
+            (
+                "service",
+                "highway",
+                vec![LocationTag::Pedestrian, LocationTag::Street],
+            ),
+            ("bicycle_parking", "amenity", vec![LocationTag::Outside]),
+            (
+                "platform",
+                "railway",
+                vec![LocationTag::Outside, LocationTag::Railway],
+            ),
+            ("memorial", "place", vec![LocationTag::Outside]),
+            (
+                "parking",
+                "amenity",
+                vec![LocationTag::Parking, LocationTag::Street],
+            ),
+            ("motorway", "highway", vec![LocationTag::Street]),
+            ("trunk", "highway", vec![LocationTag::Street]),
+            ("primary", "highway", vec![LocationTag::Street]),
+            ("secondary", "highway", vec![LocationTag::Street]),
+            ("tertiary", "highway", vec![LocationTag::Street]),
+            ("unclassified", "highway", vec![LocationTag::Street]),
+            ("residential", "highway", vec![LocationTag::Street]),
+            ("living_street", "highway", vec![LocationTag::Street]),
+            ("bench", "amenity", vec![]),
+            ("yes", "yes", vec![]),
+        ] {
+            let body = serde_json::json!({
+                "type": kind, "class": class, "lat": "52.5", "lon": "9.25",
+                "display_name": "Fixture", "osm_type": "way"
+            })
+            .to_string();
+            let mut server = TestServer::new("200 OK", &body).await;
+            let mut actual = LocationTag::extract_categories_from_nominatim(
+                Coordinate {
+                    lat: 52.5,
+                    lon: 9.25,
+                },
+                Some(server.auth()),
+            )
+            .await
+            .expect("classify local response");
+            assert_eq!(
+                actual.categories(),
+                expected
+                    .into_iter()
+                    .collect(),
+                "{kind}/{class}"
+            );
+            server
+                .request()
+                .await;
+        }
     }
 }

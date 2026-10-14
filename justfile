@@ -7,6 +7,23 @@ ndkPlatform := "30"
 
 default: build-release-all
 
+[group('tests')]
+test:
+    cargo test --workspace
+
+[group('tests')]
+test-core:
+    cargo test --workspace --no-default-features
+
+[group('tests')]
+test-all:
+    cargo test --workspace --all-features
+
+# Opt-in: live map services, ONNX inference, and large sample recordings.
+[group('tests')]
+test-integration:
+    cargo test -p image_flow_lib --lib -- --ignored --test-threads=1
+
 [group('tool-chain')]
 install-toolchains:
     rustup target add {{targets}}

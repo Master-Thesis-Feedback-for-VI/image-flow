@@ -13,8 +13,20 @@ use crate::{
     requesters::AuthToHost,
 };
 
+pub mod http;
 pub mod location_data;
+mod regression;
 pub mod video_data;
+
+pub fn empty_detection_result() -> ultralytics_inference::Results {
+    ultralytics_inference::Results::new(
+        ndarray::Array3::zeros((4, 4, 3)),
+        String::new(),
+        std::sync::Arc::new(std::collections::HashMap::new()),
+        ultralytics_inference::Speed::default(),
+        (4, 4),
+    )
+}
 
 pub const DOMINANT_COLOR_AMOUNT: usize = 4;
 pub static TESTING_FILE_MANAGER: Mutex<TestingFileManger> =
@@ -252,6 +264,7 @@ const AMOUNT_OF_IMAGES: usize = 13;
 
 #[allow(clippy::significant_drop_tightening)]
 #[tokio::test]
+#[ignore = "creates the shared out/ directory"]
 async fn instantiate_file_manager() {
     let mut lock = TESTING_FILE_MANAGER
         .lock()
@@ -263,6 +276,7 @@ async fn instantiate_file_manager() {
 
 #[allow(clippy::significant_drop_tightening)]
 #[tokio::test]
+#[ignore = "requires the full sample image collection"]
 async fn correct_amount_of_files() {
     let mut binding = TESTING_FILE_MANAGER
         .lock()

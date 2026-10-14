@@ -114,3 +114,93 @@ impl From<NominatimLocationData> for Coordinate {
         value.as_coordinate()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{error::ImageFlowError, tests::http::TestServer};
+
+    fn fixture() -> serde_json::Value {
+        serde_json::json!({"class": "building", "type": "house", "lat": "-12.5",
+            "lon": "9.25", "display_name": "Test house", "osm_type": "way"})
+    }
+
+    #[test]
+    #[allow(clippy::used_underscore_binding)]
+    fn response_parses_string_coordinates_and_optional_name() {
+        let data: NominatimLocationData =
+            serde_json::from_value(fixture()).expect("parse response");
+        assert_eq!(data.class, "building");
+        assert_eq!(data.location_type, "house");
+        assert!(
+            data._name_map
+                .is_none()
+        );
+        let coordinate: Coordinate = data.into();
+        assert_eq!(coordinate.lat, -12.5);
+        assert_eq!(coordinate.lon, 9.25);
+    }
+
+    #[test]
+    fn response_rejects_invalid_coordinates_and_missing_required_fields() {
+        for value in [
+            serde_json::json!("bad"),
+            serde_json::json!(12.5),
+            serde_json::Value::Null,
+        ] {
+            let mut response = fixture();
+            response["lat"] = value;
+            assert!(serde_json::from_value::<NominatimLocationData>(response).is_err());
+        }
+        let mut response = fixture();
+        response
+            .as_object_mut()
+            .expect("fixture object")
+            .remove("class");
+        assert!(serde_json::from_value::<NominatimLocationData>(response).is_err());
+    }
+
+    #[tokio::test]
+    async fn reverse_request_includes_coordinates_options_authentication_and_headers() {
+        let mut server = TestServer::new("200 OK", &fixture().to_string()).await;
+        let data = NominatimLocationData::from_cords(
+            Coordinate {
+                lat: -12.5,
+                lon: 9.25,
+            },
+            Some(server.auth()),
+        )
+        .await
+        .expect("local reverse lookup");
+        assert_eq!(data.lat, -12.5);
+        let request = server
+            .request()
+            .await
+            .to_lowercase();
+        assert!(request.starts_with("get /reverse?format=json&lat=-12.5&lon=9.25&zoom=18&addressdetails=1&extratags=1&namedetails=1 http/1.1"));
+        assert!(request.contains("authorization: basic dgvzddpzzwnyzxq="));
+        assert!(request.contains("user-agent:"));
+        assert!(request.contains("referer:"));
+    }
+
+    #[tokio::test]
+    async fn reverse_request_rejects_error_status_and_invalid_json() {
+        for (status, body) in [
+            ("503 Service Unavailable", "{}"),
+            ("200 OK", "invalid JSON"),
+        ] {
+            let mut server = TestServer::new(status, body).await;
+            let error =
+                fetch_raw_nominatim_data(Coordinate { lat: 0.0, lon: 0.0 }, Some(server.auth()))
+                    .await
+                    .expect_err("invalid response");
+            assert!(matches!(
+                ImageFlowError::from(error),
+                ImageFlowError::Request { .. }
+            ));
+            server
+                .request()
+                .await;
+        }
+    }
+}

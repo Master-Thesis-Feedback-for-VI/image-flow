@@ -169,7 +169,6 @@ impl<'a> IntoIterator for &'a UniqueLocationTags {
 
 #[cfg(test)]
 mod test {
-    use rand::prelude::*;
     use std::collections::HashSet;
 
     use crate::location::tag::{LocationTag, UniqueLocationTags};
@@ -182,16 +181,9 @@ mod test {
         LocationTag::Pedestrian,
         LocationTag::Intersection,
         LocationTag::Elevator,
+        LocationTag::Parking,
+        LocationTag::Railway,
     ];
-
-    fn randomize_context_categories() -> HashSet<LocationTag> {
-        let mut rng = rand::rng();
-        let amount = rand::random_range(0..ALL_CATS.len());
-        ALL_CATS
-            .sample(&mut rng, amount)
-            .copied()
-            .collect()
-    }
 
     fn valid_unique_cat(set: &UniqueLocationTags) -> bool {
         let either = set.contains(LocationTag::Inside) ^ set.contains(LocationTag::Outside);
@@ -216,35 +208,91 @@ mod test {
     }
 
     #[test]
-    fn randomized_picks() {
-        let amount = 10usize;
-
-        for _ in 0..amount {
-            let sample = randomize_context_categories()
-                .into_iter()
-                .collect::<UniqueLocationTags>();
-            assert!(
-                valid_unique_cat(&sample),
-                "Non valid here is data: {sample:#?}"
-            );
-        }
-
-        for _ in 0..amount {
-            let sample1: UniqueLocationTags = randomize_context_categories()
-                .into_iter()
+    fn every_subset_obeys_implications_and_outside_precedence_in_both_orders() {
+        for mask in 0..(1 << ALL_CATS.len()) {
+            let chosen: Vec<_> = ALL_CATS
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| mask & (1 << index) != 0)
+                .map(|(_, tag)| *tag)
                 .collect();
-            let sample2: UniqueLocationTags = randomize_context_categories()
-                .into_iter()
+            let forward: UniqueLocationTags = chosen
+                .iter()
+                .copied()
                 .collect();
-
-            let mut sample3 = UniqueLocationTags::new();
-            sample3.extend(sample1);
-            sample3.extend(sample2);
-
-            assert!(
-                valid_unique_cat(&sample3),
-                "Non valid here is data: {sample3:#?}"
+            let mut backward = UniqueLocationTags::new();
+            for tag in chosen
+                .iter()
+                .rev()
+            {
+                backward.insert(*tag);
+                backward.insert(*tag);
+            }
+            let mut expected: HashSet<_> = chosen
+                .iter()
+                .flat_map(|tag| {
+                    tag.implied_additional_categories()
+                        .iter()
+                        .copied()
+                })
+                .collect();
+            if expected.contains(&LocationTag::Outside) {
+                expected.remove(&LocationTag::Inside);
+            }
+            assert!(valid_unique_cat(&forward));
+            assert_eq!(
+                forward
+                    .into_iter()
+                    .collect::<HashSet<_>>(),
+                expected
             );
+            assert_eq!(backward.categories(), expected);
         }
+    }
+
+    #[test]
+    fn categories_drains_and_remove_does_not_remove_implied_tags() {
+        let mut tags = UniqueLocationTags::new_singular(LocationTag::Parking);
+        tags.remove(&LocationTag::Parking);
+        tags.remove(&LocationTag::Forest);
+        assert_eq!(tags.categories(), HashSet::from([LocationTag::Street]));
+        assert!(tags.is_empty());
+        assert!(
+            tags.categories()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn sorting_preserves_duplicates_and_does_not_mutate_input() {
+        let input = [
+            LocationTag::Inside,
+            LocationTag::Railway,
+            LocationTag::Inside,
+        ];
+        assert_eq!(
+            super::sort_location_tags(&input),
+            [
+                LocationTag::Railway,
+                LocationTag::Inside,
+                LocationTag::Inside
+            ]
+        );
+        assert_eq!(input[0], LocationTag::Inside);
+        assert_eq!(super::sort_location_tags(&[]), []);
+    }
+
+    #[test]
+    fn serialization_preserves_unique_tags() {
+        let tags = UniqueLocationTags::new_singular(LocationTag::Forest);
+        let json = serde_json::to_string(&tags).expect("serialize tags");
+        let restored: UniqueLocationTags = serde_json::from_str(&json).expect("deserialize tags");
+        assert_eq!(
+            tags.into_iter()
+                .collect::<HashSet<_>>(),
+            restored
+                .into_iter()
+                .collect()
+        );
     }
 }

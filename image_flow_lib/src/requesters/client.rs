@@ -87,3 +87,41 @@ pub async fn throttled_post(url: &str) -> reqwest::RequestBuilder {
 
     get_client().post(url)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_headers_identify_the_application() {
+        let headers = default_headers();
+        assert_eq!(headers[header::REFERER], HTTP_REFERER);
+        assert_eq!(headers[header::USER_AGENT], USER_AGENT);
+        assert!(std::ptr::eq(get_client(), get_client()));
+    }
+
+    #[tokio::test]
+    async fn request_builders_preserve_method_and_url() {
+        let url = "http://127.0.0.1:1234/fixture";
+        let get = throttled_get(url)
+            .await
+            .build()
+            .expect("build GET");
+        let post = throttled_post(url)
+            .await
+            .build()
+            .expect("build POST");
+        assert_eq!(get.method(), reqwest::Method::GET);
+        assert_eq!(post.method(), reqwest::Method::POST);
+        assert_eq!(
+            get.url()
+                .as_str(),
+            url
+        );
+        assert_eq!(
+            post.url()
+                .as_str(),
+            url
+        );
+    }
+}

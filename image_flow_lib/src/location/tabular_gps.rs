@@ -105,11 +105,14 @@ impl DataPointsGPS {
             })
     }
 
+    /// # Panics
+    /// Panics if `interval` is zero or negative.
     pub fn fetch_every(
         &self,
         interval: Duration,
         range_around_offset: Duration,
     ) -> impl Iterator<Item = &TabularGPS> + '_ {
+        assert!(interval > Duration::zero(), "interval must be positive");
         let last_ref = self
             .0
             .last()
@@ -166,12 +169,20 @@ where
     D: Deserializer<'de>,
 {
     let secs: f64 = Deserialize::deserialize(deserializer)?;
-    let whole = secs.trunc() as i64;
-    let nanos = ((secs - secs.trunc()) * 1_000_000_000.).round() as u32;
-    Ok(Utc
-        .timestamp_opt(whole, nanos)
+    if !secs.is_finite() {
+        return Err(serde::de::Error::custom("timestamp must be finite"));
+    }
+    let mut whole = secs.floor() as i64;
+    let mut nanos = ((secs - secs.floor()) * 1_000_000_000.).round() as u32;
+    if nanos == 1_000_000_000 {
+        whole = whole
+            .checked_add(1)
+            .ok_or_else(|| serde::de::Error::custom("timestamp out of range"))?;
+        nanos = 0;
+    }
+    Utc.timestamp_opt(whole, nanos)
         .single()
-        .expect("Could not convert time"))
+        .ok_or_else(|| serde::de::Error::custom("timestamp out of range"))
 }
 
 #[cfg(test)]
@@ -290,5 +301,206 @@ mod test {
             .unwrap();
 
         assert_eq!(best.offset, Duration::seconds(-1));
+    }
+
+    #[test]
+    fn csv_computes_fractional_offsets_relative_to_first_row() {
+        let points = DataPointsGPS::from_csv(
+            b"timestamp,latitude,longitude\n1000.25,52.5,-9.25\n1001.75,53,10\n".as_slice(),
+        )
+        .expect("parse fractional timestamps");
+        assert_eq!(points.len(), 2);
+        assert_eq!(
+            points[0]
+                .timestamp
+                .timestamp_subsec_nanos(),
+            250_000_000
+        );
+        assert_eq!(points[0].offset, Duration::zero());
+        assert_eq!(points[1].offset, Duration::milliseconds(1500));
+        assert_eq!(
+            points[0]
+                .coordinates()
+                .lat,
+            52.5
+        );
+        assert_eq!(
+            points[0]
+                .coordinates()
+                .lon,
+            -9.25
+        );
+    }
+
+    #[test]
+    fn csv_empty_and_invalid_rows() {
+        let empty = DataPointsGPS::from_csv(b"timestamp,latitude,longitude\n".as_slice())
+            .expect("empty CSV");
+        assert!(empty.is_empty());
+        assert!(
+            empty
+                .fetch_best_match(Duration::zero(), Duration::seconds(1))
+                .is_none()
+        );
+        assert_eq!(
+            empty
+                .fetch_every(Duration::seconds(1), Duration::seconds(1))
+                .count(),
+            0
+        );
+        for data in [
+            "timestamp,latitude,longitude\nwrong,1,2\n",
+            "timestamp,latitude,longitude\n0,wrong,2\n",
+            "timestamp,latitude\n0,1\n",
+        ] {
+            assert!(DataPointsGPS::from_csv(data.as_bytes()).is_err(), "{data}");
+        }
+    }
+
+    fn table() -> DataPointsGPS {
+        DataPointsGPS(
+            [0, 1, 2, 3, 4]
+                .map(|s| gps_with_offset(Duration::seconds(s)))
+                .to_vec(),
+        )
+    }
+
+    #[test]
+    fn fetch_includes_both_boundaries_and_normalizes_negative_range() {
+        let points = table();
+        for range in [Duration::seconds(1), Duration::seconds(-1)] {
+            let offsets: Vec<_> = points
+                .fetch(Duration::seconds(2), range)
+                .map(|p| {
+                    p.offset
+                        .num_seconds()
+                })
+                .collect();
+            assert_eq!(offsets, [1, 2, 3]);
+        }
+        assert_eq!(
+            points
+                .fetch(Duration::seconds(2), Duration::zero())
+                .count(),
+            1
+        );
+        assert!(
+            points
+                .fetch_best_match(Duration::seconds(10), Duration::seconds(1))
+                .is_none()
+        );
+        assert_eq!(
+            points
+                .fetch_best_match(Duration::milliseconds(2600), Duration::seconds(1))
+                .expect("nearest match")
+                .offset,
+            Duration::seconds(3)
+        );
+    }
+
+    #[test]
+    fn bounds_are_inclusive_and_allow_a_single_instant() {
+        let points = table();
+        let offsets: Vec<_> = points
+            .fetch_within_bounds(Duration::seconds(1), Duration::seconds(3))
+            .map(|p| {
+                p.offset
+                    .num_seconds()
+            })
+            .collect();
+        assert_eq!(offsets, [1, 2, 3]);
+        assert_eq!(
+            points
+                .fetch_within_bounds(Duration::seconds(2), Duration::seconds(2))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "assertion failed: lower_bound <= upper_bound")]
+    fn inverted_bounds_are_rejected() {
+        let _ = table().fetch_within_bounds(Duration::seconds(2), Duration::seconds(1));
+    }
+
+    #[test]
+    fn periodic_fetch_uses_strict_tolerance_and_excludes_final_tick() {
+        let points = table();
+        let offsets: Vec<_> = points
+            .fetch_every(Duration::seconds(2), Duration::milliseconds(100))
+            .map(|p| {
+                p.offset
+                    .num_seconds()
+            })
+            .collect();
+        assert_eq!(offsets, [0, 2]);
+        assert_eq!(
+            points
+                .fetch_every(Duration::seconds(2), Duration::zero())
+                .count(),
+            0
+        );
+        assert_eq!(
+            points
+                .fetch_every(Duration::seconds(2), Duration::seconds(-1))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn csv_handles_negative_fractional_timestamps_and_nanosecond_carry() {
+        let points = DataPointsGPS::from_csv(
+            b"timestamp,latitude,longitude\n-0.25,1,2\n1.9999999996,3,4\n".as_slice(),
+        )
+        .expect("parse fractional timestamps");
+        assert_eq!(
+            points[0]
+                .timestamp
+                .timestamp(),
+            -1
+        );
+        assert_eq!(
+            points[0]
+                .timestamp
+                .timestamp_subsec_nanos(),
+            750_000_000
+        );
+        assert_eq!(
+            points[1]
+                .timestamp
+                .timestamp(),
+            2
+        );
+        assert_eq!(
+            points[1]
+                .timestamp
+                .timestamp_subsec_nanos(),
+            0
+        );
+        assert_eq!(points[1].offset, Duration::milliseconds(2250));
+    }
+
+    #[test]
+    fn csv_rejects_nonfinite_and_out_of_range_timestamps_without_panicking() {
+        for timestamp in ["NaN", "inf", "-inf", "1e30", "-1e30"] {
+            let csv = format!("timestamp,latitude,longitude\n{timestamp},1,2\n");
+            assert!(
+                DataPointsGPS::from_csv(csv.as_bytes()).is_err(),
+                "{timestamp}"
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "interval must be positive")]
+    fn periodic_fetch_rejects_zero_interval_instead_of_looping_forever() {
+        let _ = table().fetch_every(Duration::zero(), Duration::milliseconds(100));
+    }
+
+    #[test]
+    #[should_panic(expected = "interval must be positive")]
+    fn periodic_fetch_rejects_negative_interval_instead_of_looping_forever() {
+        let _ = table().fetch_every(Duration::seconds(-1), Duration::milliseconds(100));
     }
 }

@@ -192,3 +192,104 @@ fn zip_folder(
     zip.finish()?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_requires_video_csv_and_serialized_output() {
+        assert!(Args::try_parse_from(["pipeline"]).is_err());
+        assert!(Args::try_parse_from(["pipeline", "-v", "video.mov", "-c", "gps.csv"]).is_err());
+        let args = Args::try_parse_from([
+            "pipeline",
+            "-v",
+            "video.mov",
+            "-c",
+            "gps.csv",
+            "-s",
+            "result",
+            "--output",
+            "frames",
+        ])
+        .expect("parse complete arguments");
+        assert_eq!(args.vid, PathBuf::from("video.mov"));
+        assert_eq!(args.csv, PathBuf::from("gps.csv"));
+        assert_eq!(args.serialized_output, PathBuf::from("result"));
+        assert_eq!(args.output, Some(PathBuf::from("frames")));
+        let args = Args::try_parse_from([
+            "pipeline",
+            "--vid",
+            "video.mov",
+            "--csv",
+            "gps.csv",
+            "--serialized-output",
+            "result",
+        ])
+        .expect("parse long arguments");
+        assert!(
+            args.output
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn archive_preserves_nested_files_empty_directories_and_exact_contents() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let source = dir
+            .path()
+            .join("source");
+        fs::create_dir_all(source.join("nested/empty")).expect("create directories");
+        fs::write(source.join("content.json"), b"[]").expect("write content");
+        fs::write(source.join("nested/recording.mov"), b"movie bytes").expect("write movie");
+        fs::write(source.join("zero"), b"").expect("write empty file");
+        let destination = dir
+            .path()
+            .join("result.zip");
+        zip_folder(&source, &destination).expect("archive folder");
+        let mut archive =
+            zip::ZipArchive::new(File::open(destination).expect("open ZIP")).expect("read ZIP");
+        assert_eq!(archive.len(), 5);
+        for (name, expected) in [
+            ("content.json", b"[]".as_slice()),
+            ("nested/recording.mov", b"movie bytes".as_slice()),
+            ("zero", b"".as_slice()),
+        ] {
+            let mut file = archive
+                .by_name(name)
+                .expect("archive member");
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes)
+                .expect("read member");
+            assert_eq!(bytes, expected);
+        }
+        assert!(
+            archive
+                .by_name("nested/empty/")
+                .expect("empty directory")
+                .is_dir()
+        );
+    }
+
+    #[test]
+    fn archive_rejects_missing_source_and_unwritable_destination() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        assert!(
+            zip_folder(
+                dir.path()
+                    .join("missing"),
+                dir.path()
+                    .join("result.zip")
+            )
+            .is_err()
+        );
+        assert!(
+            zip_folder(
+                dir.path(),
+                dir.path()
+                    .join("missing/result.zip")
+            )
+            .is_err()
+        );
+    }
+}

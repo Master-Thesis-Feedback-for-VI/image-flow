@@ -32,3 +32,39 @@ impl Display for Coordinate {
         write!(f, "(lat = {}, lon = {})", self.lat, self.lon)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_and_urls_preserve_signed_coordinates() {
+        let coordinate = Coordinate {
+            lat: -12.5,
+            lon: 9.25,
+        };
+        assert_eq!(coordinate.to_string(), "(lat = -12.5, lon = 9.25)");
+        assert_eq!(
+            coordinate.print_location_url(),
+            "https://www.openstreetmap.org/?mlat=-12.5&mlon=9.25#map=16/-12.5/9.25"
+        );
+        assert_eq!(
+            coordinate.as_url_osm(),
+            "https://www.openstreetmap.org/?mlat=-12.5&mlon=9.25#map=17/-12.5/9.25"
+        );
+    }
+
+    #[test]
+    fn json_round_trip_and_missing_field_rejection() {
+        let coordinate = Coordinate {
+            lat: 90.0,
+            lon: -180.0,
+        };
+        let restored: Coordinate =
+            serde_json::from_value(serde_json::to_value(coordinate).expect("serialize coordinate"))
+                .expect("deserialize coordinate");
+        assert_eq!(restored.lat, coordinate.lat);
+        assert_eq!(restored.lon, coordinate.lon);
+        assert!(serde_json::from_str::<Coordinate>(r#"{"lat":1}"#).is_err());
+    }
+}

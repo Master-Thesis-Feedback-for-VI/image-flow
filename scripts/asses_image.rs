@@ -29,7 +29,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .first()
         .expect("This must contain something!");
 
-    let evaluation = image_flow::evaluate_context_impl(gps_data, args.img).await?;
+    let evaluation =
+        image_flow::recognize_location_tags_impl(gps_data.coordinates(), None, args.img, 4).await?;
 
     println!("{evaluation:#?}");
 
@@ -42,4 +43,43 @@ fn check_validity(args: &Args) -> bool {
         && args
             .gps
             .exists()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_requires_image_and_gps_paths() {
+        assert!(Args::try_parse_from(["asses_image"]).is_err());
+        assert!(Args::try_parse_from(["asses_image", "-i", "image.png"]).is_err());
+        for arguments in [
+            ["asses_image", "-i", "image.png", "-g", "gps.csv"],
+            ["asses_image", "--img", "image.png", "--gps", "gps.csv"],
+        ] {
+            let args = Args::try_parse_from(arguments).expect("parse arguments");
+            assert_eq!(args.img, PathBuf::from("image.png"));
+            assert_eq!(args.gps, PathBuf::from("gps.csv"));
+        }
+    }
+
+    #[test]
+    fn path_validation_requires_both_paths_to_exist() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let img = dir
+            .path()
+            .join("image.png");
+        let gps = dir
+            .path()
+            .join("gps.csv");
+        let args = Args {
+            img: img.clone(),
+            gps: gps.clone(),
+        };
+        assert!(!check_validity(&args));
+        std::fs::write(&img, b"fixture").expect("write image fixture");
+        assert!(!check_validity(&args));
+        std::fs::write(&gps, b"fixture").expect("write GPS fixture");
+        assert!(check_validity(&args));
+    }
 }

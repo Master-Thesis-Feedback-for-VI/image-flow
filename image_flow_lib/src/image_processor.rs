@@ -192,3 +192,120 @@ fn circular_hue_difference(a: f32, b: f32) -> f32 {
         .rem_euclid(360.0);
     difference.min(360.0 - difference)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        context::location_based_context::evaluate_image_as_location_tags,
+        location::tag::LocationTag,
+    };
+
+    fn color(rgb: Srgb<u8>) -> DominantColor {
+        DominantColor {
+            rgb,
+            _percentage: 1.0,
+        }
+    }
+
+    #[test]
+    fn hue_distance_wraps_and_is_symmetric() {
+        for (a, b, expected) in [
+            (0.0, 0.0, 0.0),
+            (0.0, 180.0, 180.0),
+            (350.0, 10.0, 20.0),
+            (-10.0, 10.0, 20.0),
+            (720.0, 0.0, 0.0),
+        ] {
+            assert_eq!(circular_hue_difference(a, b), expected);
+            assert_eq!(circular_hue_difference(b, a), expected);
+        }
+    }
+
+    #[test]
+    fn color_matching_respects_each_tolerance() {
+        let red = color(Srgb::new(255, 0, 0));
+        assert_eq!(red.rgb(), (255, 0, 0));
+        assert!(red.is_close_to_color(red.rgb, 0.0, 0.0, 0.0));
+        assert!(!red.is_close_to_color(Srgb::new(0, 255, 0), 0.0, 1.0, 1.0));
+        assert!(!red.is_close_to_color(Srgb::new(255, 128, 128), 180.0, 0.0, 1.0));
+        assert!(!red.is_close_to_color(Srgb::new(128, 0, 0), 180.0, 1.0, 0.0));
+        assert!(red.is_close_to_color(Srgb::new(0, 255, 0), 180.0, 1.0, 1.0));
+    }
+
+    #[test]
+    fn invalid_color_tolerances_panic() {
+        for (hue, saturation, value) in [
+            (-1.0, 0.0, 0.0),
+            (181.0, 0.0, 0.0),
+            (0.0, -0.1, 0.0),
+            (0.0, 1.1, 0.0),
+            (0.0, 0.0, -0.1),
+            (0.0, 0.0, 1.1),
+            (f32::NAN, 0.0, 0.0),
+        ] {
+            assert!(
+                std::panic::catch_unwind(|| {
+                    color(FOREST_GREEN).is_close_to_color(FOREST_GREEN, hue, saturation, value)
+                })
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn forest_classification_requires_a_matching_color() {
+        let empty: DominantColors = std::iter::empty().collect();
+        assert!(!empty.any_close_to_forest_green());
+        assert!(evaluate_image_as_location_tags(&empty).is_empty());
+        let red: DominantColors = std::iter::once(color(Srgb::new(255, 0, 0))).collect();
+        assert!(!red.any_close_to_forest_green());
+        let green: DominantColors = std::iter::once(color(FOREST_GREEN)).collect();
+        let tags = evaluate_image_as_location_tags(&green);
+        assert!(tags.contains(LocationTag::Forest));
+        assert!(tags.contains(LocationTag::Outside));
+        let image_tags = crate::context::image_based_context::evaluate_image_into_location_tags(
+            &green,
+            &crate::image::detections::ImageDetections::new(),
+        );
+        assert!(image_tags.contains(LocationTag::Forest));
+        assert!(image_tags.contains(LocationTag::Outside));
+    }
+
+    #[tokio::test]
+    async fn solid_image_extracts_its_color() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir
+            .path()
+            .join("solid.png");
+        image::RgbImage::from_pixel(16, 12, image::Rgb([32, 150, 32]))
+            .save(&path)
+            .expect("save fixture image");
+        let colors = dominant_colors(path, 1)
+            .await
+            .expect("extract colors");
+        assert_eq!(colors.len(), 1);
+        let (r, g, b) = colors[0].rgb();
+        assert!(r.abs_diff(32) <= 1 && g.abs_diff(150) <= 1 && b.abs_diff(32) <= 1);
+        assert!(colors.any_close_to_forest_green());
+    }
+
+    #[tokio::test]
+    async fn missing_and_corrupt_images_return_errors() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir
+            .path()
+            .join("bad.png");
+        assert!(
+            dominant_colors(&path, 1)
+                .await
+                .is_err()
+        );
+        std::fs::write(&path, b"not an image").expect("write corrupt image");
+        assert!(
+            dominant_colors(&path, 1)
+                .await
+                .is_err()
+        );
+    }
+}
