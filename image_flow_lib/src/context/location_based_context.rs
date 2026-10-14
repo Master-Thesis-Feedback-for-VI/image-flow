@@ -129,7 +129,7 @@ impl LocationTag {
             "pedestrian" | "service" => {
                 categories.insert(Self::Pedestrian);
             }
-            "bicycle_parking" | "platform" => {
+            "bicycle_parking" | "platform" | "memorial" => {
                 categories.insert(Self::Outside);
             }
             "parking" => {
@@ -139,25 +139,20 @@ impl LocationTag {
             | "residential" | "living_street" => {
                 categories.insert(Self::Street);
             }
-            "bench" => {}
+            "bench" | "yes" => {}
             _ => {
+                let msg = format!(
+                    "New location type: [[{location_type}]],\ncheck it out here: {}",
+                    loc_data
+                        .as_coordinate()
+                        .as_url_osm()
+                );
                 #[cfg(debug_assertions)]
                 {
-                    unreachable!(
-                        "New location type: [[{location_type}]],\ncheck it out here: {}",
-                        loc_data
-                            .as_coordinate()
-                            .as_url_osm()
-                    )
+                    unreachable!("{}", msg);
                 }
                 #[cfg(not(debug_assertions))]
                 {
-                    let msg = format!(
-                        "New location type: [[{location_type}]],\ncheck it out here: {}",
-                        loc_data
-                            .as_coordinate()
-                            .as_url_osm()
-                    );
                     tracing::error!("{}", msg);
                     return Err(crate::error::request(msg));
                 }
@@ -177,14 +172,23 @@ impl LocationTag {
             "railway" => {
                 categories.insert(Self::Railway);
             }
-            "place" | "amenity" => {}
+            "place" | "amenity" | "yes" => {}
             _ => {
-                unreachable!(
+                let msg = format!(
                     "New Class: {location_class}, check it out here: {}",
                     loc_data
                         .as_coordinate()
                         .as_url_osm()
-                )
+                );
+                #[cfg(debug_assertions)]
+                {
+                    unreachable!("{}", msg)
+                }
+                #[cfg(not(debug_assertions))]
+                {
+                    tracing::error!("{}", msg);
+                    return Err(crate::error::request(msg));
+                }
             }
         }
 
