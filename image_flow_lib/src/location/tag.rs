@@ -80,6 +80,22 @@ impl UniqueLocationTags {
         self.extend([context_category]);
     }
 
+    /// Merge weaker contextual hints without letting nearby outdoor features or
+    /// image colors override a known building-containment result.
+    pub(crate) fn extend_context_tags(&mut self, hints: Self) {
+        let inside = self.contains(LocationTag::Inside);
+        self.extend(
+            hints
+                .into_iter()
+                .filter(|tag| {
+                    !inside
+                        || !tag
+                            .implied_additional_categories()
+                            .contains(&LocationTag::Outside)
+                }),
+        );
+    }
+
     #[must_use]
     pub fn contains(&self, context_category: LocationTag) -> bool {
         self.categories
@@ -190,6 +206,34 @@ mod test {
         let neither = !set.contains(LocationTag::Inside) && !set.contains(LocationTag::Outside);
 
         either || neither || set.is_empty()
+    }
+
+    #[test]
+    fn classification_outdoor_hints_do_not_override_inside() {
+        for hint in [
+            LocationTag::Forest,
+            LocationTag::Intersection,
+            LocationTag::Outside,
+        ] {
+            let mut tags = UniqueLocationTags::new_singular(LocationTag::Inside);
+            tags.extend_context_tags(UniqueLocationTags::new_singular(hint));
+            assert!(tags.contains(LocationTag::Inside));
+            assert!(!tags.contains(LocationTag::Outside));
+            assert!(!tags.contains(hint));
+        }
+    }
+
+    #[test]
+    fn classification_context_preserves_nonconflicting_tags() {
+        let mut tags = UniqueLocationTags::new_singular(LocationTag::Inside);
+        tags.extend_context_tags(UniqueLocationTags::new_singular(LocationTag::Railway));
+        assert!(tags.contains(LocationTag::Inside));
+        assert!(tags.contains(LocationTag::Railway));
+
+        let mut tags = UniqueLocationTags::new_singular(LocationTag::Outside);
+        tags.extend_context_tags(UniqueLocationTags::new_singular(LocationTag::Forest));
+        assert!(tags.contains(LocationTag::Outside));
+        assert!(tags.contains(LocationTag::Forest));
     }
 
     #[test]
