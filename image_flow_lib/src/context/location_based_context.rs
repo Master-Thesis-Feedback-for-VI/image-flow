@@ -108,7 +108,7 @@ impl LocationTag {
                 categories.insert(Self::Elevator);
             }
             "apartments" | "library" | "cafe" | "pub" | "house" | "university" | "hospital"
-            | "bicycle_parking" | "platform" => {}
+            | "bicycle_parking" | "platform" | "bench" => {}
             "track" => {
                 categories.insert(Self::Forest);
             }
@@ -261,6 +261,19 @@ mod test {
             assert!(!tags.contains(LocationTag::Inside));
             assert!(!tags.contains(LocationTag::Outside));
         }
+    }
+
+    #[test]
+    fn classification_nearest_bench_does_not_imply_inside_or_outside() {
+        let data = serde_json::from_value(serde_json::json!({
+            "class": "amenity", "type": "bench",
+            "lat": "52.3848136", "lon": "9.8039927",
+            "display_name": "Nearby bench", "osm_type": "node"
+        }))
+        .unwrap();
+
+        let tags = LocationTag::categories_from_nominatim_data(&data).unwrap();
+        assert!(tags.is_empty());
     }
 
     #[test]
