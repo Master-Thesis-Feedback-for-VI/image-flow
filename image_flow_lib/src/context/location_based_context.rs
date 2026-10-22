@@ -108,15 +108,13 @@ impl LocationTag {
                 categories.insert(Self::Elevator);
             }
             "apartments" | "library" | "cafe" | "pub" | "house" | "university" | "hospital"
-            | "bicycle_parking" | "platform" | "bench" | "waste_basket" | "building" | "memorial" => {}
+            | "bicycle_parking" | "platform" | "bench" | "waste_basket" | "building" | "memorial"
+            | "yes" => {}
             "track" => {
                 categories.insert(Self::Forest);
             }
             "pedestrian" | "service" => {
                 categories.insert(Self::Pedestrian);
-            }
-            "bicycle_parking" | "platform" | "memorial" => {
-                categories.insert(Self::Outside);
             }
             "parking" | "motorcycle_parking" => {
                 categories.insert(Self::Parking);
@@ -125,7 +123,6 @@ impl LocationTag {
             | "residential" | "living_street" => {
                 categories.insert(Self::Street);
             }
-            "bench" | "yes" => {}
             _ => {
                 let msg = format!(
                     "New location type: [[{location_type}]],\ncheck it out here: {}",
