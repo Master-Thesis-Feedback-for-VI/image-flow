@@ -1,4 +1,5 @@
 use clap::Parser;
+use indicatif::{ProgressBar, ProgressStyle};
 use image_flow::{
     ImageFlowEvaluationForRecording,
     context::image_based_context::{ImageRecognizer, ModelVariant},
@@ -61,6 +62,7 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = enable_tracing(Some(image_flow::FilterLevel::Error));
+    ultralytics_inference::logging::set_verbose(false);
 
     let args: Args = Args::parse();
     if !args
@@ -102,6 +104,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
     println!("... finished now proceeding to data tagging");
 
+    let progress = ProgressBar::new(zipped.len() as u64);
+    progress.set_style(ProgressStyle::with_template(
+        "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} images | ETA {eta} {msg}",
+    )?);
+    progress.enable_steady_tick(Duration::from_millis(100));
+
     let mut unique_geo_cat_collection: Vec<ImageFlowEvaluationForRecording> = Vec::new();
     for (location, frame) in zipped.iter() {
         let auth = AUTH_AGENT.clone();
@@ -118,14 +126,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ImageFlowEvaluationForRecording::new(Arc::new(eva), time_diff, *location);
 
                 // println!("This data was captured:\n{evaluated:#?}");
-                println!("Evaluated frame...");
                 unique_geo_cat_collection.push(evaluated);
             }
             Err(e) => {
                 tracing::error!("{e}");
             }
         }
+        progress.inc(1);
     }
+    progress.finish_with_message("Tagging complete");
 
     let content_file = args
         .serialized_output

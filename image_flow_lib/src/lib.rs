@@ -289,7 +289,7 @@ pub async fn image_flow_evaluation_impl(
 
     let additional_categories =
         evaluate_image_into_location_tags(&dominant_colors, &image_detections);
-    location_tags.extend(additional_categories);
+    location_tags.extend_context_tags(additional_categories);
 
     Ok(ImageFlowEvaluation {
         location_tags,

@@ -254,19 +254,51 @@ pub async fn inside_building(
 ) -> crate::Result<LocationTag> {
     let Coordinate { lat, lon } = coordinates.into();
 
-    let query = format!("[out:json];is_in({lat},{lon})->.a;wr(pivot.a)[building];out tags;");
+    // is_in returns both closed ways and generated areas. Keep the ways directly
+    // as well as pivoting areas back to their source ways/relations.
+    let query = format!(
+        "[out:json][timeout:25];is_in({lat},{lon})->.a;\
+         (way.a[building];wr(pivot.a)[building];);out tags;"
+    );
     let resp = fetch_raw_overpass_data(&query, auth).await?;
-    let empty_building = resp["elements"]
-        .as_array()
-        .cloned()
-        .is_some_and(|val| val.is_empty());
+    classify_building_response(resp)
+}
 
-    let ctx = if empty_building {
-        LocationTag::Outside
-    } else {
+fn classify_building_response(resp: Value) -> crate::Result<LocationTag> {
+    #[derive(Deserialize)]
+    struct BuildingResponse {
+        elements: Vec<BuildingElement>,
+    }
+    #[derive(Deserialize)]
+    struct BuildingElement {
+        tags: std::collections::HashMap<String, String>,
+    }
+
+    // Overpass can return HTTP 200 with a runtime error and partial/empty data.
+    // Neither that nor an invalid response is evidence of being indoors/outdoors.
+    if let Some(remark) = resp.get("remark") {
+        return Err(error::request(format!(
+            "Overpass building query failed: {remark}"
+        )));
+    }
+    let response: BuildingResponse = serde_json::from_value(resp)?;
+    let inside = response
+        .elements
+        .iter()
+        .any(|element| {
+            element
+                .tags
+                .get("building")
+                .is_some_and(|building| {
+                    // Open-sided roofs and explicitly non-buildings aren't interiors.
+                    !matches!(building.as_str(), "" | "no" | "roof")
+                })
+        });
+    Ok(if inside {
         LocationTag::Inside
-    };
-    Ok(ctx)
+    } else {
+        LocationTag::Outside
+    })
 }
 
 pub async fn find_nearby_intersections(
@@ -315,11 +347,52 @@ pub async fn find_nearby_intersections(
 mod test {
     use std::sync::Arc;
 
+    use super::classify_building_response;
+    use serde_json::json;
+
     use crate::{
         location::tag::LocationTag,
         requesters::overpass::inside_building,
         tests::{AUTH_AGENT, fetch_img},
     };
+
+    #[test]
+    fn classification_building_response_requires_valid_complete_data() {
+        for response in [
+            json!({}),
+            json!({"elements": null}),
+            json!({"elements": {}}),
+            json!({"elements": [], "remark": "runtime error: Query timed out"}),
+            json!({"elements": [{"tags": {"building": "yes"}}], "remark": "out of memory"}),
+        ] {
+            assert!(classify_building_response(response).is_err());
+        }
+    }
+
+    #[test]
+    fn classification_building_response_distinguishes_interiors_and_roofs() {
+        for (response, expected) in [
+            (json!({"elements": []}), LocationTag::Outside),
+            (
+                json!({"elements": [{"tags": {"building": "yes"}}]}),
+                LocationTag::Inside,
+            ),
+            (
+                json!({"elements": [{"tags": {"building": "apartments"}}]}),
+                LocationTag::Inside,
+            ),
+            (
+                json!({"elements": [{"tags": {"building": "no"}}]}),
+                LocationTag::Outside,
+            ),
+            (
+                json!({"elements": [{"tags": {"building": "roof"}}]}),
+                LocationTag::Outside,
+            ),
+        ] {
+            assert_eq!(classify_building_response(response).unwrap(), expected);
+        }
+    }
 
     #[tokio::test]
     #[ignore = "requires live map services and sample images"]
