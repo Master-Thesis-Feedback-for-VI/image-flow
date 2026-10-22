@@ -108,7 +108,7 @@ impl LocationTag {
                 categories.insert(Self::Elevator);
             }
             "apartments" | "library" | "cafe" | "pub" | "house" | "university" | "hospital"
-            | "bicycle_parking" | "platform" | "bench" => {}
+            | "bicycle_parking" | "platform" | "bench" | "waste_basket" | "building" | "memorial" => {}
             "track" => {
                 categories.insert(Self::Forest);
             }
@@ -118,7 +118,7 @@ impl LocationTag {
             "bicycle_parking" | "platform" | "memorial" => {
                 categories.insert(Self::Outside);
             }
-            "parking" => {
+            "parking" | "motorcycle_parking" => {
                 categories.insert(Self::Parking);
             }
             "motorway" | "trunk" | "primary" | "secondary" | "tertiary" | "unclassified"
@@ -153,7 +153,7 @@ impl LocationTag {
             "railway" => {
                 categories.insert(Self::Railway);
             }
-            "building" | "place" | "amenity" | "yes" => {}
+            "building" | "place" | "amenity" | "yes" | "historic" => {}
             _ => {
                 let msg = format!(
                     "New Class: {location_class}, check it out here: {}",
@@ -274,6 +274,58 @@ mod test {
 
         let tags = LocationTag::categories_from_nominatim_data(&data).unwrap();
         assert!(tags.is_empty());
+    }
+
+    #[test]
+    fn classification_motorcycle_parking_maps_to_parking() {
+        let data = serde_json::from_value(serde_json::json!({
+            "class": "amenity", "type": "motorcycle_parking",
+            "lat": "52.3848509", "lon": "9.8037274",
+            "display_name": "Motorcycle parking", "osm_type": "node"
+        }))
+        .unwrap();
+
+        let tags = LocationTag::categories_from_nominatim_data(&data).unwrap();
+        assert!(tags.contains(LocationTag::Parking));
+        assert!(tags.contains(LocationTag::Street));
+        assert_eq!(tags.iter().count(), 2);
+    }
+
+    #[test]
+    fn classification_nearest_waste_basket_adds_no_location_tags() {
+        let data = serde_json::from_value(serde_json::json!({
+            "class": "amenity", "type": "waste_basket",
+            "lat": "52.3849102", "lon": "9.8039816",
+            "display_name": "Nearby waste basket", "osm_type": "node"
+        }))
+        .unwrap();
+
+        let tags = LocationTag::categories_from_nominatim_data(&data).unwrap();
+        assert!(tags.is_empty());
+    }
+
+    #[test]
+    fn classification_building_service_and_memorial_are_supported() {
+        for (class, location_type, expected_tag) in [
+            ("building", "building", None),
+            ("highway", "service", Some(LocationTag::Street)),
+            ("historic", "memorial", None),
+        ] {
+            let data = serde_json::from_value(serde_json::json!({
+                "class": class, "type": location_type,
+                "lat": "52.380141", "lon": "9.7242918",
+                "display_name": "Nearby feature", "osm_type": "way"
+            }))
+            .unwrap();
+
+            let tags = LocationTag::categories_from_nominatim_data(&data).unwrap();
+            if let Some(tag) = expected_tag {
+                assert!(tags.contains(tag));
+                assert_eq!(tags.iter().count(), 1);
+            } else {
+                assert!(tags.is_empty());
+            }
+        }
     }
 
     #[test]
