@@ -31,7 +31,7 @@ install-toolchains:
 
 [group('build')]
 build target:
-    IPHONEOS_DEPLOYMENT_TARGET=15.1 cargo build --target {{target}} --release --lib --no-default-features
+    cargo build --target {{target}} --release --lib --no-default-features
 
 [group('build')]
 build-android target:
@@ -126,7 +126,7 @@ tmp_output := "pipeline_out"
 [group('scripts')]
 pipeline video_path csv_path tmp_out serialized_output:
     mkdir -p {{tmp_out}}
-    cargo run --bin pipeline --features="video, cli" -- \
+    cargo run --bin pipeline --release --features="video, cli" -- \
         -v {{video_path}} \
         -c {{csv_path}} \
         -s {{serialized_output}} \

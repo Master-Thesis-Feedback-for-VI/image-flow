@@ -1,2 +1,10 @@
+[env]
+MACOSX_DEPLOYMENT_TARGET = "27.0"
+IPHONEOS_DEPLOYMENT_TARGET= "27.0"
+
 [build]
 rustc-workspace-wrapper = "clippy-driver"
+
+[target.'cfg(target_os = "macos")']
+# ONNX Runtime's CoreML backend needs Clang's availability-check runtime.
+rustflags = ["-C", "default-linker-libraries=yes"]
