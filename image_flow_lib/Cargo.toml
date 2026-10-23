@@ -51,9 +51,6 @@ tempfile = "3.27"
 tokio = { version = "1.53", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-ultralytics-inference = { version = "0.0", default-features = false, features = [
-  "annotate",
-] }
 uniffi.workspace = true
 tokio-stream = "0.1"
 futures = "0.3"
@@ -61,6 +58,12 @@ futures-util = "0.3"
 zip = { version = "8", optional = true }
 walkdir = { version = "2.5", optional = true }
 ndarray = { version = "0.17", features = ["serde"] }
+
+# THIS VERSION IS PINNED BECUASE THESE DEVS DO NOT KNOW WHAT PATCHES ARE FOR. UPDATING THIS
+# MIGHT VERY WELL BREAK THIS LIB. UPDATE ONLY IF ARE READY TO FIX ISSUES.
+ultralytics-inference = { version = "0.0.54", default-features = false, features = [
+  "annotate",
+] }
 
 [dev-dependencies]
 insta = "1.48"
