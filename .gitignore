@@ -20,3 +20,4 @@ devenv.local.yaml
 
 yolo26*
 .env*
+/result
