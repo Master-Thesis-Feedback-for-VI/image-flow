@@ -124,39 +124,19 @@ clean_out:
 tmp_output := "pipeline_out"
 
 [group('scripts')]
-pipeline zip_path tmp_out serialized_output:
+pipeline input_path tmp_out serialized_output:
     mkdir -p '{{tmp_out}}'
     cargo run --bin pipeline --release --features="video, cli" -- \
-        --input '{{zip_path}}' \
+        --input '{{input_path}}' \
         -s '{{serialized_output}}' \
         --output '{{tmp_out}}'
 
 [group('scripts')]
-pipeline_all: clean_out pipeline_small pipeline_large pipeline_conti_alehop
-
-[group('scripts')]
-pipeline_small:
-    rm -rf {{"." / tmp_output / "small"}}
-    mkdir -p {{"." / tmp_output / "small"}}
+pipeline_all: clean_out
+    mkdir -p \
+        '{{"." / tmp_output / "tmp_out"}}' \
+        '{{"." / tmp_output / "results"}}' 
     just pipeline \
-        "sample_data/recording-2026-08-12-13-24-46.zip" \
-        '{{tmp_output / "recording-2026-08-12-13-24-46"}}' \
-        '{{"." / tmp_output / "small"}}'
-
-[group('scripts')]
-pipeline_large:
-    rm -rf {{"." / tmp_output / "large"}}
-    mkdir -p {{"." / tmp_output / "large"}}
-    just pipeline \
-        "sample_data/recording-2026-08-12-13-41-36.zip" \
-        '{{tmp_output / "recording-2026-08-12-13-41-36"}}' \
-        '{{"." / tmp_output / "large"}}'
-
-[group('scripts')]
-pipeline_conti_alehop:
-    rm -rf {{"." / tmp_output / "conti_alehop"}}
-    mkdir -p {{"." / tmp_output / "conti_alehop"}}
-    just pipeline \
-        "sample_data/recording-2026-09-21-13-56-50.zip" \
-        '{{tmp_output / "recording-2026-09-21-13-56-50"}}' \
-        '{{"." / tmp_output / "conti_alehop"}}'
+        '{{"." / "sample_data"}}' \
+        '{{"." / tmp_output / "tmp_out"}}' \
+        '{{"." / tmp_output / "results"}}' 

@@ -49,12 +49,14 @@ pub static AUTH_AGENT: LazyLock<Option<AuthToHost>> = LazyLock::new(|| {
 
 #[derive(Parser, Debug)]
 struct Args {
-    /// ZIP containing a recording folder with one .mov and `gps_timestamps.csv`.
+    /// Recording ZIP, or a folder of ZIPs containing a .mov and `gps_timestamps.csv`.
     #[arg(short, long)]
     input: PathBuf,
     #[arg(long)]
+    /// Frame output directory (one subfolder per ZIP for folder input).
     output: Option<PathBuf>,
     #[arg(short, long)]
+    /// Result directory (one subfolder and ZIP per recording for folder input).
     serialized_output: PathBuf,
 }
 
@@ -64,11 +66,102 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ultralytics_inference::logging::set_verbose(false);
 
     let args: Args = Args::parse();
+    let inputs = recording_inputs(&args.input)?;
+    let batch = args
+        .input
+        .is_dir();
+    let model_dir = tempdir()?;
+    let model_path = args
+        .output
+        .as_deref()
+        .unwrap_or_else(|| model_dir.path());
+    fs::create_dir_all(model_path)?;
+    let model = ImageRecognizer::new_impl(ModelVariant::Large, model_path).await?;
+    let mut failures = 0;
+    for (index, input) in inputs
+        .iter()
+        .enumerate()
+    {
+        let job = recording_args(&args, input, batch);
+        println!(
+            "Processing archive {}/{}: {}",
+            index + 1,
+            inputs.len(),
+            input.display()
+        );
+        if let Err(error) = process_recording(&job, &model).await {
+            eprintln!("Failed to process {}: {error}", input.display());
+            failures += 1;
+        }
+    }
+    if failures > 0 {
+        return Err(std::io::Error::other(format!("{failures} recording(s) failed")).into());
+    }
+    Ok(())
+}
+
+fn recording_inputs(input: &Path) -> std::io::Result<Vec<PathBuf>> {
+    if !input.is_dir() {
+        fs::metadata(input)?;
+        return Ok(vec![input.to_path_buf()]);
+    }
+    let mut inputs = Vec::new();
+    for entry in fs::read_dir(input)? {
+        let entry = entry?;
+        let path = entry.path();
+        if entry
+            .file_type()?
+            .is_file()
+            && path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"))
+        {
+            inputs.push(path);
+        }
+    }
+    inputs.sort();
+    if inputs.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "No ZIP files found in input folder",
+        ));
+    }
+    Ok(inputs)
+}
+
+fn recording_args(args: &Args, input: &Path, batch: bool) -> Args {
+    let name = input
+        .file_stem()
+        .expect("input file has a name");
+    Args {
+        input: input.to_path_buf(),
+        output: args
+            .output
+            .as_ref()
+            .map(|path| if batch { path.join(name) } else { path.clone() }),
+        serialized_output: if batch {
+            args.serialized_output
+                .join(name)
+        } else {
+            args.serialized_output
+                .clone()
+        },
+    }
+}
+
+async fn process_recording(
+    args: &Args,
+    model: &ImageRecognizer,
+) -> Result<(), Box<dyn std::error::Error>> {
     if args
         .serialized_output
         .is_file()
     {
-        panic!("File already exists")
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "Result path is already a file",
+        )
+        .into());
     }
 
     let tmp_dir = tempdir()?;
@@ -78,8 +171,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .to_path_buf();
     let dir_path = args
         .output
+        .clone()
         .unwrap_or(tmp_dir_path);
-    let model = ImageRecognizer::new_impl(ModelVariant::Large, &dir_path).await?;
+    fs::create_dir_all(&dir_path)?;
 
     let file = File::open(csv)?;
     let datapoints = DataPointsGPS::from_csv(file)?;
@@ -103,7 +197,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut unique_geo_cat_collection: Vec<ImageFlowEvaluationForRecording> = Vec::new();
     for (location, frame) in zipped.iter() {
         let auth = AUTH_AGENT.clone();
-        let evaluation = image_flow_evaluation_impl(*location, auth, frame, &model, 4).await;
+        let evaluation = image_flow_evaluation_impl(*location, auth, frame, model, 4).await;
 
         match evaluation {
             Ok(eva) => {
@@ -149,8 +243,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.serialized_output
             .join("..")
             .join(format!("{dst_file}.zip")),
-    )
-    .expect("Could not zip folder");
+    )?;
 
     Ok(())
 }
@@ -253,6 +346,77 @@ fn zip_folder(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn folder_inputs_are_sorted_zips_only_and_not_recursive() {
+        let dir = tempdir().expect("temporary directory");
+        for name in ["b.ZIP", "a.zip", "notes.txt"] {
+            fs::write(
+                dir.path()
+                    .join(name),
+                "",
+            )
+            .expect("write file");
+        }
+        fs::create_dir(
+            dir.path()
+                .join("nested.zip"),
+        )
+        .expect("create nested directory");
+        fs::write(
+            dir.path()
+                .join("nested.zip/hidden.zip"),
+            "",
+        )
+        .expect("write nested ZIP");
+        assert_eq!(
+            recording_inputs(dir.path()).expect("find ZIPs"),
+            vec![
+                dir.path()
+                    .join("a.zip"),
+                dir.path()
+                    .join("b.ZIP")
+            ]
+        );
+        let single = dir
+            .path()
+            .join("a.zip");
+        assert_eq!(recording_inputs(&single).expect("single ZIP"), vec![single]);
+        assert!(
+            recording_inputs(
+                &dir.path()
+                    .join("missing")
+            )
+            .is_err()
+        );
+        let empty = tempdir().expect("empty directory");
+        assert!(recording_inputs(empty.path()).is_err());
+    }
+
+    #[test]
+    fn batch_outputs_are_isolated_and_single_outputs_unchanged() {
+        let args = Args::try_parse_from([
+            "pipeline", "-i", "inputs", "-s", "results", "--output", "frames",
+        ])
+        .expect("parse args");
+        let input = Path::new("inputs/recording.zip");
+        let batch = recording_args(&args, input, true);
+        assert_eq!(batch.input, input);
+        assert_eq!(batch.output, Some(PathBuf::from("frames/recording")));
+        assert_eq!(batch.serialized_output, PathBuf::from("results/recording"));
+        let single = recording_args(&args, input, false);
+        assert_eq!(single.output, args.output);
+        assert_eq!(single.serialized_output, args.serialized_output);
+        let args = Args {
+            output: None,
+            ..args
+        };
+        assert!(
+            recording_args(&args, input, true)
+                .output
+                .is_none()
+        );
+    }
 
     #[test]
     fn cli_requires_input_zip_and_serialized_output() {
