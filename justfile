@@ -124,13 +124,12 @@ clean_out:
 tmp_output := "pipeline_out"
 
 [group('scripts')]
-pipeline video_path csv_path tmp_out serialized_output:
-    mkdir -p {{tmp_out}}
+pipeline zip_path tmp_out serialized_output:
+    mkdir -p '{{tmp_out}}'
     cargo run --bin pipeline --release --features="video, cli" -- \
-        -v {{video_path}} \
-        -c {{csv_path}} \
-        -s {{serialized_output}} \
-        --output {{tmp_out}}
+        --input '{{zip_path}}' \
+        -s '{{serialized_output}}' \
+        --output '{{tmp_out}}'
 
 [group('scripts')]
 pipeline_all: clean_out pipeline_small pipeline_large pipeline_conti_alehop
@@ -140,8 +139,7 @@ pipeline_small:
     rm -rf {{"." / tmp_output / "small"}}
     mkdir -p {{"." / tmp_output / "small"}}
     just pipeline \
-        "sample_data/recording-2026-08-12-13-24-46/6FC95631-8DE8-43F1-AEB4-DC4B6AF6CAC5.mov" \
-        "sample_data/recording-2026-08-12-13-24-46/gps_timestamps.csv" \
+        "sample_data/recording-2026-08-12-13-24-46.zip" \
         '{{tmp_output / "recording-2026-08-12-13-24-46"}}' \
         '{{"." / tmp_output / "small"}}'
 
@@ -150,8 +148,7 @@ pipeline_large:
     rm -rf {{"." / tmp_output / "large"}}
     mkdir -p {{"." / tmp_output / "large"}}
     just pipeline \
-        "sample_data/recording-2026-08-12-13-41-36/E510E1EE-D294-4EAF-8652-B95B9D72AC21.mov" \
-        "sample_data/recording-2026-08-12-13-41-36/gps_timestamps.csv" \
+        "sample_data/recording-2026-08-12-13-41-36.zip" \
         '{{tmp_output / "recording-2026-08-12-13-41-36"}}' \
         '{{"." / tmp_output / "large"}}'
 
@@ -160,7 +157,6 @@ pipeline_conti_alehop:
     rm -rf {{"." / tmp_output / "conti_alehop"}}
     mkdir -p {{"." / tmp_output / "conti_alehop"}}
     just pipeline \
-        "sample_data/recording-2026-09-21-13-56-50/5A4E31ED-E618-4923-AAF7-BC6ED3E08AC7.mov" \
-        "sample_data/recording-2026-09-21-13-56-50/gps_timestamps.csv" \
+        "sample_data/recording-2026-09-21-13-56-50.zip" \
         '{{tmp_output / "recording-2026-09-21-13-56-50"}}' \
         '{{"." / tmp_output / "conti_alehop"}}'

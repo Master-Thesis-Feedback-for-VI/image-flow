@@ -1,5 +1,4 @@
 use clap::Parser;
-use indicatif::{ProgressBar, ProgressStyle};
 use image_flow::{
     ImageFlowEvaluationForRecording,
     context::image_based_context::{ImageRecognizer, ModelVariant},
@@ -8,6 +7,7 @@ use image_flow::{
     requesters::AuthToHost,
     video_slicer::ImageGPSZip,
 };
+use indicatif::{ProgressBar, ProgressStyle};
 use std::io::Read;
 use std::io::Write;
 use std::{
@@ -49,10 +49,9 @@ pub static AUTH_AGENT: LazyLock<Option<AuthToHost>> = LazyLock::new(|| {
 
 #[derive(Parser, Debug)]
 struct Args {
+    /// ZIP containing a recording folder with one .mov and `gps_timestamps.csv`.
     #[arg(short, long)]
-    vid: PathBuf,
-    #[arg(short, long)]
-    csv: PathBuf,
+    input: PathBuf,
     #[arg(long)]
     output: Option<PathBuf>,
     #[arg(short, long)]
@@ -65,16 +64,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ultralytics_inference::logging::set_verbose(false);
 
     let args: Args = Args::parse();
-    if !args
-        .vid
-        .exists()
-        || !args
-            .csv
-            .exists()
-    {
-        panic!("Path does not exist")
-    }
-
     if args
         .serialized_output
         .is_file()
@@ -83,6 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let tmp_dir = tempdir()?;
+    let (video, csv) = extract_recording(&args.input, tmp_dir.path())?;
     let tmp_dir_path = tmp_dir
         .path()
         .to_path_buf();
@@ -91,12 +81,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(tmp_dir_path);
     let model = ImageRecognizer::new_impl(ModelVariant::Large, &dir_path).await?;
 
-    let file = File::open(args.csv)?;
+    let file = File::open(csv)?;
     let datapoints = DataPointsGPS::from_csv(file)?;
 
     println!("Processing Video...");
     let zipped = ImageGPSZip::from_video_and_gps(
-        &args.vid,
+        &video,
         &datapoints,
         &dir_path,
         chrono::Duration::milliseconds(FRAME_DIFF_DURATION_IN_MILIS),
@@ -136,6 +126,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     progress.finish_with_message("Tagging complete");
 
+    fs::create_dir_all(&args.serialized_output)?;
     let content_file = args
         .serialized_output
         .join("content.json");
@@ -146,7 +137,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let movie_name = args
         .serialized_output
         .join("recording.mov");
-    fs::copy(&args.vid, movie_name)?;
+    fs::copy(&video, movie_name)?;
 
     let dst_file = args
         .serialized_output
@@ -162,6 +153,63 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .expect("Could not zip folder");
 
     Ok(())
+}
+
+fn extract_recording(
+    input: &Path,
+    destination: &Path,
+) -> Result<(PathBuf, PathBuf), Box<dyn std::error::Error>> {
+    let mut archive = zip::ZipArchive::new(File::open(input)?)?;
+    let mut videos = Vec::new();
+    let mut csvs = Vec::new();
+    for index in 0..archive.len() {
+        let entry = archive.by_index(index)?;
+        let path = entry
+            .enclosed_name()
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "Unsafe path in input ZIP")
+            })?;
+        if entry.is_dir() || path.starts_with("__MACOSX") {
+            continue;
+        }
+        if path
+            .file_name()
+            .is_some_and(|name| name == "gps_timestamps.csv")
+        {
+            csvs.push((index, path));
+        } else if path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("mov"))
+        {
+            videos.push((index, path));
+        }
+    }
+
+    let ([(video_index, video_path)], [(csv_index, csv_path)]) =
+        (videos.as_slice(), csvs.as_slice())
+    else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Input ZIP must contain exactly one .mov file and one gps_timestamps.csv",
+        )
+        .into());
+    };
+    if video_path.parent() != csv_path.parent() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "The .mov file and gps_timestamps.csv must be in the same recording folder",
+        )
+        .into());
+    }
+
+    // Only extract the two inputs, using fixed paths rather than archive member names.
+    let video = destination.join("recording.mov");
+    let csv = destination.join("gps_timestamps.csv");
+    for (index, path) in [(*video_index, &video), (*csv_index, &csv)] {
+        let mut entry = archive.by_index(index)?;
+        std::io::copy(&mut entry, &mut File::create(path)?)?;
+    }
+    Ok((video, csv))
 }
 
 fn zip_folder(
@@ -207,31 +255,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cli_requires_video_csv_and_serialized_output() {
+    fn cli_requires_input_zip_and_serialized_output() {
         assert!(Args::try_parse_from(["pipeline"]).is_err());
-        assert!(Args::try_parse_from(["pipeline", "-v", "video.mov", "-c", "gps.csv"]).is_err());
+        assert!(Args::try_parse_from(["pipeline", "-i", "recording.zip"]).is_err());
         let args = Args::try_parse_from([
             "pipeline",
-            "-v",
-            "video.mov",
-            "-c",
-            "gps.csv",
+            "-i",
+            "recording.zip",
             "-s",
             "result",
             "--output",
             "frames",
         ])
         .expect("parse complete arguments");
-        assert_eq!(args.vid, PathBuf::from("video.mov"));
-        assert_eq!(args.csv, PathBuf::from("gps.csv"));
+        assert_eq!(args.input, PathBuf::from("recording.zip"));
         assert_eq!(args.serialized_output, PathBuf::from("result"));
         assert_eq!(args.output, Some(PathBuf::from("frames")));
         let args = Args::try_parse_from([
             "pipeline",
-            "--vid",
-            "video.mov",
-            "--csv",
-            "gps.csv",
+            "--input",
+            "recording.zip",
             "--serialized-output",
             "result",
         ])
@@ -239,6 +282,79 @@ mod tests {
         assert!(
             args.output
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn extracts_recording_folder_from_zip() {
+        let dir = tempdir().expect("temporary directory");
+        let input = dir
+            .path()
+            .join("input.zip");
+        let mut archive = ZipWriter::new(File::create(&input).expect("create ZIP"));
+        for (name, content) in [
+            ("recording-2026-08-12-13-24-46/6FC95631.mov", "movie bytes"),
+            (
+                "recording-2026-08-12-13-24-46/gps_timestamps.csv",
+                "gps data",
+            ),
+            ("__MACOSX/recording/._6FC95631.mov", "metadata"),
+        ] {
+            archive
+                .start_file(name, SimpleFileOptions::default())
+                .expect("start member");
+            archive
+                .write_all(content.as_bytes())
+                .expect("write member");
+        }
+        archive
+            .finish()
+            .expect("finish ZIP");
+        let (video, csv) = extract_recording(&input, dir.path()).expect("extract recording");
+        assert_eq!(fs::read(video).expect("read video"), b"movie bytes");
+        assert_eq!(fs::read(csv).expect("read CSV"), b"gps data");
+    }
+
+    #[test]
+    fn rejects_invalid_recording_archives() {
+        let dir = tempdir().expect("temporary directory");
+        for members in [
+            vec!["recording/video.mov"],
+            vec!["recording/gps_timestamps.csv"],
+            vec!["recording/video.mov", "other/gps_timestamps.csv"],
+            vec![
+                "recording/video.mov",
+                "recording/other.mov",
+                "recording/gps_timestamps.csv",
+            ],
+            vec!["../video.mov", "../gps_timestamps.csv"],
+        ] {
+            let input = dir
+                .path()
+                .join("input.zip");
+            let mut archive = ZipWriter::new(File::create(&input).expect("create ZIP"));
+            for name in members {
+                archive
+                    .start_file(name, SimpleFileOptions::default())
+                    .expect("start member");
+            }
+            archive
+                .finish()
+                .expect("finish ZIP");
+            assert!(extract_recording(&input, dir.path()).is_err());
+        }
+        let input = dir
+            .path()
+            .join("invalid.zip");
+        fs::write(&input, "not a ZIP").expect("write invalid ZIP");
+        assert!(extract_recording(&input, dir.path()).is_err());
+        assert!(
+            extract_recording(
+                &dir.path()
+                    .join("missing.zip"),
+                dir.path()
+            )
+            .is_err()
         );
     }
 
