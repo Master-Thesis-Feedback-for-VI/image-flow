@@ -124,19 +124,21 @@ clean_out:
 tmp_output := "pipeline_out"
 
 [group('scripts')]
-pipeline input_path tmp_out serialized_output:
+pipeline input_path tmp_out serialized_output error_log="pipeline-errors.log":
     mkdir -p '{{tmp_out}}'
     cargo run --bin pipeline --release --features="video, cli" -- \
         --input '{{input_path}}' \
         -s '{{serialized_output}}' \
-        --output '{{tmp_out}}'
+        --output '{{tmp_out}}' \
+        --error-log '{{error_log}}'
 
 [group('scripts')]
 pipeline_all: clean_out
     mkdir -p \
         '{{"." / tmp_output / "tmp_out"}}' \
-        '{{"." / tmp_output / "results"}}' 
+        '{{"." / tmp_output / "results"}}'
     just pipeline \
         '{{"." / "sample_data"}}' \
         '{{"." / tmp_output / "tmp_out"}}' \
-        '{{"." / tmp_output / "results"}}' 
+        '{{"." / tmp_output / "results"}}' \
+        '{{"." / tmp_output / "errors.log"}}'

@@ -11,7 +11,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use std::io::Read;
 use std::io::Write;
 use std::{
-    fs::{self, File},
+    fs::{self, File, OpenOptions},
     io::BufWriter,
     path::{Path, PathBuf},
     sync::{Arc, LazyLock},
@@ -58,6 +58,9 @@ struct Args {
     #[arg(short, long)]
     /// Result directory (one subfolder and ZIP per recording for folder input).
     serialized_output: PathBuf,
+    /// Append frame and recording errors as JSON lines to this file.
+    #[arg(long, default_value = "pipeline-errors.log")]
+    error_log: PathBuf,
 }
 
 #[tokio::main]
@@ -67,6 +70,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let args: Args = Args::parse();
     let inputs = recording_inputs(&args.input)?;
+    if let Some(parent) = args
+        .error_log
+        .parent()
+        .filter(|path| {
+            !path
+                .as_os_str()
+                .is_empty()
+        })
+    {
+        fs::create_dir_all(parent)?;
+    }
+    let mut error_log = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&args.error_log)?;
     let batch = args
         .input
         .is_dir();
@@ -89,8 +107,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             inputs.len(),
             input.display()
         );
-        if let Err(error) = process_recording(&job, &model).await {
+        if let Err(error) = process_recording(&job, &model, &mut error_log).await {
             eprintln!("Failed to process {}: {error}", input.display());
+            log_processing_error(&mut error_log, input, None, error.as_ref())?;
             failures += 1;
         }
     }
@@ -135,6 +154,9 @@ fn recording_args(args: &Args, input: &Path, batch: bool) -> Args {
         .expect("input file has a name");
     Args {
         input: input.to_path_buf(),
+        error_log: args
+            .error_log
+            .clone(),
         output: args
             .output
             .as_ref()
@@ -152,6 +174,7 @@ fn recording_args(args: &Args, input: &Path, batch: bool) -> Args {
 async fn process_recording(
     args: &Args,
     model: &ImageRecognizer,
+    error_log: &mut File,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if args
         .serialized_output
@@ -195,7 +218,10 @@ async fn process_recording(
     progress.enable_steady_tick(Duration::from_millis(100));
 
     let mut unique_geo_cat_collection: Vec<ImageFlowEvaluationForRecording> = Vec::new();
-    for (location, frame) in zipped.iter() {
+    for (index, (location, frame)) in zipped
+        .iter()
+        .enumerate()
+    {
         let auth = AUTH_AGENT.clone();
         let evaluation = image_flow_evaluation_impl(*location, auth, frame, model, 4).await;
 
@@ -214,6 +240,17 @@ async fn process_recording(
             }
             Err(e) => {
                 tracing::error!("{e}");
+                log_processing_error(
+                    error_log,
+                    &args.input,
+                    Some((
+                        index + 1,
+                        frame
+                            .time_offset_from_first_frame
+                            .num_milliseconds(),
+                    )),
+                    &e,
+                )?;
             }
         }
         progress.inc(1);
@@ -246,6 +283,23 @@ async fn process_recording(
     )?;
 
     Ok(())
+}
+
+fn log_processing_error(
+    writer: &mut impl Write,
+    input: &Path,
+    frame: Option<(usize, i64)>,
+    error: &dyn std::error::Error,
+) -> std::io::Result<()> {
+    let entry = serde_json::json!({
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "archive": input,
+        "frame": frame.map(|(index, _)| index),
+        "offset_ms": frame.map(|(_, offset)| offset),
+        "error": format!("{error:?}"),
+    });
+    writeln!(writer, "{entry}")?;
+    writer.flush()
 }
 
 fn extract_recording(
@@ -346,6 +400,66 @@ fn zip_folder(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn error_log_option_has_default_and_accepts_custom_path() {
+        let args = Args::try_parse_from(["pipeline", "-i", "input.zip", "-s", "results"])
+            .expect("default log argument");
+        assert_eq!(args.error_log, PathBuf::from("pipeline-errors.log"));
+        let args = Args::try_parse_from([
+            "pipeline",
+            "-i",
+            "inputs",
+            "-s",
+            "results",
+            "--error-log",
+            "logs/errors.log",
+        ])
+        .expect("custom log argument");
+        assert_eq!(args.error_log, PathBuf::from("logs/errors.log"));
+        assert_eq!(
+            recording_args(&args, Path::new("inputs/one.zip"), true).error_log,
+            args.error_log
+        );
+    }
+
+    #[test]
+    fn error_log_collects_frame_and_recording_errors_as_json_lines() {
+        let mut log = Vec::new();
+        let error = std::io::Error::other("evaluation failed\nextra detail");
+        log_processing_error(&mut log, Path::new("one.zip"), Some((3, 800)), &error)
+            .expect("log frame error");
+        log_processing_error(&mut log, Path::new("two.zip"), None, &error)
+            .expect("log recording error");
+        let content = String::from_utf8(log).expect("UTF-8 log");
+        let entries: Vec<serde_json::Value> = content
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("JSON entry"))
+            .collect();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0]["archive"], "one.zip");
+        assert_eq!(entries[0]["frame"], 3);
+        assert_eq!(entries[0]["offset_ms"], 800);
+        assert!(
+            entries[0]["error"]
+                .as_str()
+                .expect("error details")
+                .contains("evaluation failed")
+        );
+        assert!(entries[0]["timestamp"].is_string());
+        assert_eq!(entries[1]["archive"], "two.zip");
+        assert!(entries[1]["frame"].is_null());
+        assert!(entries[1]["offset_ms"].is_null());
+        assert!(
+            log_processing_error(
+                &mut std::io::sink(),
+                Path::new("one.zip"),
+                Some((1, 0)),
+                &error
+            )
+            .is_ok()
+        );
+    }
 
     #[test]
     fn folder_inputs_are_sorted_zips_only_and_not_recursive() {
