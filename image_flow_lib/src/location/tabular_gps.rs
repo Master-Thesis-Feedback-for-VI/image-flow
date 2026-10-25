@@ -243,7 +243,11 @@ mod test {
 
     #[test]
     fn fetch_every_second() {
-        let table = read_csv_file(Some(10));
+        let table = DataPointsGPS(
+            (0..10)
+                .map(|second| gps_with_offset(Duration::seconds(second)))
+                .collect(),
+        );
 
         let fetched_gps = table
             .fetch_every(Duration::seconds(2), Duration::milliseconds(400))

@@ -476,7 +476,7 @@ mod test {
         for (body, expected) in [
             (r#"{"elements":[]}"#, LocationTag::Outside),
             (
-                r#"{"elements":[{"type":"way","id":1}]}"#,
+                r#"{"elements":[{"type":"way","id":1,"tags":{"building":"yes"}}]}"#,
                 LocationTag::Inside,
             ),
         ] {

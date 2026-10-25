@@ -107,20 +107,28 @@ impl LocationTag {
             "elevator" => {
                 categories.insert(Self::Elevator);
             }
+            // Nearby POIs have no equivalent tag and do not prove containment.
             "apartments" | "library" | "cafe" | "pub" | "house" | "university" | "hospital"
-            | "bicycle_parking" | "platform" | "bench" | "waste_basket" | "building" | "memorial"
-            | "yes" => {}
+            | "bicycle_parking" | "platform" | "bench" | "waste_basket" | "building"
+            | "memorial" | "yes" | "map" | "research" | "tomb" | "restaurant" | "ice_cream"
+            | "atm" | "gift" | "mall" | "shoes" | "jewelry" | "fire_hose" | "fast_food"
+            | "vending_machine" | "bakery" | "defibrillator" | "florist" | "pharmacy"
+            | "luggage_locker" | "ticket_validator" | "artwork" | "clock" | "museum"
+            | "fountain" | "chemist" | "sports" | "clothes" | "perfumery" | "watches"
+            | "mobile_phone" | "optician" | "bank" | "office" | "internet_cafe" | "books"
+            | "social_facility" | "musical_instrument" | "citywalls" | "construction"
+            | "attraction" | "kindergarten" => {}
             "track" => {
                 categories.insert(Self::Forest);
             }
-            "pedestrian" | "service" => {
+            "pedestrian" | "service" | "footway" | "path" => {
                 categories.insert(Self::Pedestrian);
             }
-            "parking" | "motorcycle_parking" => {
+            "parking" | "motorcycle_parking" | "taxi" => {
                 categories.insert(Self::Parking);
             }
             "motorway" | "trunk" | "primary" | "secondary" | "tertiary" | "unclassified"
-            | "residential" | "living_street" => {
+            | "residential" | "living_street" | "cycleway" => {
                 categories.insert(Self::Street);
             }
             _ => {
@@ -150,7 +158,8 @@ impl LocationTag {
             "railway" => {
                 categories.insert(Self::Railway);
             }
-            "building" | "place" | "amenity" | "yes" | "historic" => {}
+            "building" | "place" | "amenity" | "yes" | "historic" | "tourism" | "shop"
+            | "emergency" | "office" | "landuse" | "leisure" | "information" => {}
             _ => {
                 let msg = format!(
                     "New Class: {location_class}, check it out here: {}",
@@ -285,7 +294,11 @@ mod test {
         let tags = LocationTag::categories_from_nominatim_data(&data).unwrap();
         assert!(tags.contains(LocationTag::Parking));
         assert!(tags.contains(LocationTag::Street));
-        assert_eq!(tags.iter().count(), 2);
+        assert_eq!(
+            tags.iter()
+                .count(),
+            2
+        );
     }
 
     #[test]
@@ -303,10 +316,14 @@ mod test {
 
     #[test]
     fn classification_building_service_and_memorial_are_supported() {
-        for (class, location_type, expected_tag) in [
-            ("building", "building", None),
-            ("highway", "service", Some(LocationTag::Street)),
-            ("historic", "memorial", None),
+        for (class, location_type, expected_tags) in [
+            ("building", "building", vec![]),
+            (
+                "highway",
+                "service",
+                vec![LocationTag::Street, LocationTag::Pedestrian],
+            ),
+            ("historic", "memorial", vec![]),
         ] {
             let data = serde_json::from_value(serde_json::json!({
                 "class": class, "type": location_type,
@@ -316,12 +333,90 @@ mod test {
             .unwrap();
 
             let tags = LocationTag::categories_from_nominatim_data(&data).unwrap();
-            if let Some(tag) = expected_tag {
+            assert_eq!(tags.iter().count(), expected_tags.len());
+            for tag in expected_tags {
                 assert!(tags.contains(tag));
-                assert_eq!(tags.iter().count(), 1);
-            } else {
-                assert!(tags.is_empty());
             }
+        }
+    }
+
+    #[test]
+    fn classification_location_types_from_pipeline_log_are_supported() {
+        for (class, location_type, expected) in [
+            ("tourism", "map", vec![]),
+            ("information", "map", vec![]),
+            ("amenity", "research", vec![]),
+            ("historic", "tomb", vec![]),
+            ("highway", "cycleway", vec![LocationTag::Street]),
+            ("amenity", "restaurant", vec![]),
+            ("amenity", "ice_cream", vec![]),
+            ("amenity", "atm", vec![]),
+            ("shop", "gift", vec![]),
+            ("shop", "mall", vec![]),
+            ("shop", "shoes", vec![]),
+            ("shop", "jewelry", vec![]),
+            ("emergency", "fire_hose", vec![]),
+            ("amenity", "fast_food", vec![]),
+            ("amenity", "vending_machine", vec![]),
+            ("shop", "bakery", vec![]),
+            ("emergency", "defibrillator", vec![]),
+            ("shop", "florist", vec![]),
+            ("amenity", "pharmacy", vec![]),
+            ("amenity", "luggage_locker", vec![]),
+            ("railway", "ticket_validator", vec![LocationTag::Railway]),
+            ("tourism", "artwork", vec![]),
+            ("amenity", "clock", vec![]),
+            (
+                "amenity",
+                "taxi",
+                vec![LocationTag::Parking, LocationTag::Street],
+            ),
+            ("tourism", "museum", vec![]),
+            ("amenity", "fountain", vec![]),
+            ("shop", "chemist", vec![]),
+            ("shop", "sports", vec![]),
+            ("shop", "clothes", vec![]),
+            ("shop", "perfumery", vec![]),
+            ("shop", "watches", vec![]),
+            ("shop", "mobile_phone", vec![]),
+            ("shop", "optician", vec![]),
+            ("amenity", "bank", vec![]),
+            ("building", "office", vec![]),
+            ("amenity", "internet_cafe", vec![]),
+            ("shop", "books", vec![]),
+            ("amenity", "social_facility", vec![]),
+            ("shop", "musical_instrument", vec![]),
+            ("historic", "citywalls", vec![]),
+            ("landuse", "construction", vec![]),
+            (
+                "highway",
+                "path",
+                vec![LocationTag::Pedestrian, LocationTag::Street],
+            ),
+            ("tourism", "attraction", vec![]),
+            (
+                "highway",
+                "footway",
+                vec![LocationTag::Pedestrian, LocationTag::Street],
+            ),
+            ("amenity", "kindergarten", vec![]),
+            ("office", "research", vec![]),
+            ("leisure", "sports", vec![]),
+        ] {
+            let data = serde_json::from_value(serde_json::json!({
+                "class": class, "type": location_type,
+                "lat": "52.0", "lon": "9.0",
+                "display_name": "Pipeline feature", "osm_type": "node"
+            }))
+            .unwrap();
+            let mut tags = LocationTag::categories_from_nominatim_data(&data).unwrap();
+            assert_eq!(
+                tags.categories(),
+                expected
+                    .into_iter()
+                    .collect(),
+                "{class}/{location_type}"
+            );
         }
     }
 
@@ -555,13 +650,13 @@ mod test {
         use crate::tests::http::TestServer;
         for (kind, class, expected) in [
             ("elevator", "amenity", vec![LocationTag::Elevator]),
-            ("apartments", "building", vec![LocationTag::Inside]),
-            ("library", "amenity", vec![LocationTag::Inside]),
-            ("cafe", "amenity", vec![LocationTag::Inside]),
-            ("pub", "amenity", vec![LocationTag::Inside]),
-            ("house", "building", vec![LocationTag::Inside]),
-            ("university", "amenity", vec![LocationTag::Inside]),
-            ("hospital", "amenity", vec![LocationTag::Inside]),
+            ("apartments", "building", vec![]),
+            ("library", "amenity", vec![]),
+            ("cafe", "amenity", vec![]),
+            ("pub", "amenity", vec![]),
+            ("house", "building", vec![]),
+            ("university", "amenity", vec![]),
+            ("hospital", "amenity", vec![]),
             (
                 "track",
                 "highway",
@@ -581,13 +676,9 @@ mod test {
                 "highway",
                 vec![LocationTag::Pedestrian, LocationTag::Street],
             ),
-            ("bicycle_parking", "amenity", vec![LocationTag::Outside]),
-            (
-                "platform",
-                "railway",
-                vec![LocationTag::Outside, LocationTag::Railway],
-            ),
-            ("memorial", "place", vec![LocationTag::Outside]),
+            ("bicycle_parking", "amenity", vec![]),
+            ("platform", "railway", vec![LocationTag::Railway]),
+            ("memorial", "place", vec![]),
             (
                 "parking",
                 "amenity",
@@ -602,6 +693,7 @@ mod test {
             ("residential", "highway", vec![LocationTag::Street]),
             ("living_street", "highway", vec![LocationTag::Street]),
             ("bench", "amenity", vec![]),
+            ("map", "information", vec![]),
             ("yes", "yes", vec![]),
         ] {
             let body = serde_json::json!({
