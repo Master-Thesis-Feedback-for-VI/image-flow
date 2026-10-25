@@ -66,6 +66,7 @@ ultralytics-inference = { version = "0.0.54", default-features = false, features
 ] }
 
 [dev-dependencies]
+zip = "8"
 insta = "1.48"
 rand = "0.10"
 ctor = "1.0"

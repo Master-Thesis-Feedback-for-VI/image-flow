@@ -24,6 +24,8 @@ use zip::CompressionMethod;
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
+const MODEL_SIZE: ModelVariant = ModelVariant::Large;
+
 const FRAME_DIFF_DURATION_IN_MILIS: i64 = 400;
 pub static AUTH_AGENT: LazyLock<Option<AuthToHost>> = LazyLock::new(|| {
     let user_name = option_env!("USER_AGENT_NAME");
@@ -94,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .as_deref()
         .unwrap_or_else(|| model_dir.path());
     fs::create_dir_all(model_path)?;
-    let model = ImageRecognizer::new_impl(ModelVariant::XLarge, model_path).await?;
+    let model = ImageRecognizer::new_impl(MODEL_SIZE, model_path).await?;
     let mut failures = 0;
     for (index, input) in inputs
         .iter()

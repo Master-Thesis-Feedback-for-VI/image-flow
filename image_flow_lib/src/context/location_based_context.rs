@@ -316,10 +316,14 @@ mod test {
 
     #[test]
     fn classification_building_service_and_memorial_are_supported() {
-        for (class, location_type, expected_tag) in [
-            ("building", "building", None),
-            ("highway", "service", Some(LocationTag::Street)),
-            ("historic", "memorial", None),
+        for (class, location_type, expected_tags) in [
+            ("building", "building", vec![]),
+            (
+                "highway",
+                "service",
+                vec![LocationTag::Street, LocationTag::Pedestrian],
+            ),
+            ("historic", "memorial", vec![]),
         ] {
             let data = serde_json::from_value(serde_json::json!({
                 "class": class, "type": location_type,
@@ -329,15 +333,9 @@ mod test {
             .unwrap();
 
             let tags = LocationTag::categories_from_nominatim_data(&data).unwrap();
-            if let Some(tag) = expected_tag {
+            assert_eq!(tags.iter().count(), expected_tags.len());
+            for tag in expected_tags {
                 assert!(tags.contains(tag));
-                assert_eq!(
-                    tags.iter()
-                        .count(),
-                    1
-                );
-            } else {
-                assert!(tags.is_empty());
             }
         }
     }

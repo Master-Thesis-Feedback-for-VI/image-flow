@@ -387,7 +387,7 @@ mod test {
         let errors: Vec<String> = futures::future::join_all(
             SAMPLE_VIDEO_SOURCES
                 .iter()
-                .map(|src| check_video(src.video_path)),
+                .map(|src| check_video(src.video_path())),
         )
         .await
         .into_iter()
