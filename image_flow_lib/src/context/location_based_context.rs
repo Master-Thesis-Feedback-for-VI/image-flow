@@ -159,7 +159,7 @@ impl LocationTag {
                 categories.insert(Self::Railway);
             }
             "building" | "place" | "amenity" | "yes" | "historic" | "tourism" | "shop"
-            | "emergency" | "office" | "landuse" | "leisure" => {}
+            | "emergency" | "office" | "landuse" | "leisure" | "information" => {}
             _ => {
                 let msg = format!(
                     "New Class: {location_class}, check it out here: {}",
@@ -346,6 +346,7 @@ mod test {
     fn classification_location_types_from_pipeline_log_are_supported() {
         for (class, location_type, expected) in [
             ("tourism", "map", vec![]),
+            ("information", "map", vec![]),
             ("amenity", "research", vec![]),
             ("historic", "tomb", vec![]),
             ("highway", "cycleway", vec![LocationTag::Street]),
@@ -694,6 +695,7 @@ mod test {
             ("residential", "highway", vec![LocationTag::Street]),
             ("living_street", "highway", vec![LocationTag::Street]),
             ("bench", "amenity", vec![]),
+            ("map", "information", vec![]),
             ("yes", "yes", vec![]),
         ] {
             let body = serde_json::json!({
