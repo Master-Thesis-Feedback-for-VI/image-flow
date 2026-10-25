@@ -94,7 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .as_deref()
         .unwrap_or_else(|| model_dir.path());
     fs::create_dir_all(model_path)?;
-    let model = ImageRecognizer::new_impl(ModelVariant::Large, model_path).await?;
+    let model = ImageRecognizer::new_impl(ModelVariant::XLarge, model_path).await?;
     let mut failures = 0;
     for (index, input) in inputs
         .iter()
