@@ -30,6 +30,7 @@ static OVERPASS_URLS: LazyLock<&[&str]> = LazyLock::new(|| {
 const OVERPASS_TIMEOUT: Duration = Duration::from_secs(30);
 const ROAD_TYPES: &str =
     "motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street";
+const STREET_TYPES: &str = "motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street|service";
 
 // =========================
 
@@ -248,6 +249,111 @@ fn urlencoding_encode(input: &str) -> String {
     out
 }
 
+pub async fn distance_to_street_m(
+    coordinates: impl Into<Coordinate>,
+    radius_m: f64,
+    auth: Option<Arc<AuthToHost>>,
+) -> crate::Result<Option<f64>> {
+    let coordinates = coordinates.into();
+    if !valid_coordinate(coordinates) || !radius_m.is_finite() || radius_m <= 0.0 {
+        return Err(error::request("invalid street lookup coordinate or radius"));
+    }
+    let Coordinate { lat, lon } = coordinates;
+    let query = format!(
+        r#"[out:json][timeout:25];way(around:{radius_m},{lat},{lon})["highway"~"^({STREET_TYPES})$"]["area"!="yes"];out geom;"#
+    );
+    street_distance_from_response(
+        coordinates,
+        radius_m,
+        fetch_raw_overpass_data(&query, auth).await?,
+    )
+}
+
+fn valid_coordinate(point: Coordinate) -> bool {
+    point
+        .lat
+        .is_finite()
+        && point
+            .lon
+            .is_finite()
+        && (-90.0..=90.0).contains(&point.lat)
+        && (-180.0..=180.0).contains(&point.lon)
+}
+
+fn street_distance_from_response(
+    coordinates: Coordinate,
+    radius_m: f64,
+    response: Value,
+) -> crate::Result<Option<f64>> {
+    #[derive(Deserialize)]
+    struct Streets {
+        elements: Vec<Street>,
+    }
+    #[derive(Deserialize)]
+    struct Street {
+        geometry: Vec<Coordinate>,
+    }
+    if let Some(remark) = response.get("remark") {
+        return Err(error::request(format!(
+            "Overpass street query failed: {remark}"
+        )));
+    }
+    let streets: Streets = serde_json::from_value(response)?;
+    let mut nearest: Option<f64> = None;
+    for street in streets.elements {
+        if street
+            .geometry
+            .len()
+            < 2
+            || !street
+                .geometry
+                .iter()
+                .copied()
+                .all(valid_coordinate)
+        {
+            return Err(error::request("invalid street geometry"));
+        }
+        for segment in street
+            .geometry
+            .windows(2)
+        {
+            let distance = segment_distance_m(coordinates, segment[0], segment[1]);
+            if distance <= radius_m {
+                nearest = Some(nearest.map_or(distance, |previous| previous.min(distance)));
+            }
+        }
+    }
+    Ok(nearest)
+}
+
+fn segment_distance_m(point: Coordinate, start: Coordinate, end: Coordinate) -> f64 {
+    const EARTH_RADIUS_M: f64 = 6_371_000.0;
+    let project = |coordinate: Coordinate| {
+        let longitude = (coordinate.lon - point.lon + 180.0).rem_euclid(360.0) - 180.0;
+        (
+            EARTH_RADIUS_M
+                * longitude.to_radians()
+                * point
+                    .lat
+                    .to_radians()
+                    .cos(),
+            EARTH_RADIUS_M * (coordinate.lat - point.lat).to_radians(),
+        )
+    };
+    let (ax, ay) = project(start);
+    let (bx, by) = project(end);
+    let (dx, dy) = (bx - ax, by - ay);
+    let length_squared = dx.mul_add(dx, dy * dy);
+    let fraction = if length_squared == 0.0 {
+        0.0
+    } else {
+        (-(ax.mul_add(dx, ay * dy)) / length_squared).clamp(0.0, 1.0)
+    };
+    fraction
+        .mul_add(dx, ax)
+        .hypot(fraction.mul_add(dy, ay))
+}
+
 pub async fn inside_building(
     coordinates: impl Into<Coordinate>,
     auth: Option<Arc<AuthToHost>>,
@@ -346,6 +452,108 @@ pub async fn find_nearby_intersections(
 #[cfg(test)]
 mod test {
     use std::sync::Arc;
+
+    #[test]
+    fn street_segment_distances_use_segments_not_only_nodes() {
+        use super::segment_distance_m;
+        use crate::location::coordinate_system::Coordinate;
+        let point = Coordinate { lat: 0.0, lon: 0.0 };
+        let start = Coordinate {
+            lat: 0.0,
+            lon: -0.001,
+        };
+        let end = Coordinate {
+            lat: 0.0,
+            lon: 0.001,
+        };
+        assert!(segment_distance_m(point, start, end) < 1e-8);
+        let meters_to_degrees = 180.0 / (std::f64::consts::PI * 6_371_000.0);
+        for meters in [0.5, 1.0, 1.01, 20.0] {
+            let offset = Coordinate {
+                lat: meters * meters_to_degrees,
+                lon: 0.0,
+            };
+            assert!((segment_distance_m(offset, start, end) - meters).abs() < 1e-8);
+        }
+        let beyond = Coordinate {
+            lat: 0.0,
+            lon: 0.002,
+        };
+        assert!((segment_distance_m(beyond, start, end) - 111.194_927).abs() < 0.001);
+        assert!((segment_distance_m(point, end, end) - 111.194_927).abs() < 0.001);
+        let point = Coordinate {
+            lat: 52.0,
+            lon: 9.0,
+        };
+        let start = Coordinate {
+            lat: 51.999,
+            lon: 9.000_01,
+        };
+        let end = Coordinate {
+            lat: 52.001,
+            lon: 9.000_01,
+        };
+        assert!((segment_distance_m(point, start, end) - 0.684_584).abs() < 0.001);
+        let point = Coordinate {
+            lat: 0.0,
+            lon: 180.0,
+        };
+        let start = Coordinate {
+            lat: 0.0,
+            lon: 179.999,
+        };
+        let end = Coordinate {
+            lat: 0.0,
+            lon: -179.999,
+        };
+        assert!(segment_distance_m(point, start, end) < 1e-8);
+    }
+
+    #[test]
+    fn street_distance_rejects_partial_or_invalid_responses() {
+        use crate::location::coordinate_system::Coordinate;
+        let point = Coordinate { lat: 0.0, lon: 0.0 };
+        for response in [
+            serde_json::json!({"remark":"timeout", "elements":[]}),
+            serde_json::json!({}),
+            serde_json::json!({"elements":[{}]}),
+            serde_json::json!({"elements":[{"geometry":[]}]}),
+            serde_json::json!({"elements":[{"geometry":[{"lat":91.0,"lon":0.0},{"lat":0.0,"lon":0.0}]}]}),
+        ] {
+            assert!(super::street_distance_from_response(point, 50.0, response).is_err());
+        }
+        assert_eq!(
+            super::street_distance_from_response(point, 50.0, serde_json::json!({"elements":[]}))
+                .unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn street_lookup_fetches_geometry_and_returns_nearest_distance() {
+        use crate::{location::coordinate_system::Coordinate, tests::http::TestServer};
+        let body = serde_json::json!({"elements": [
+            {"geometry":[{"lat":0.0001,"lon":-0.001},{"lat":0.0001,"lon":0.001}]},
+            {"geometry":[{"lat":0.000_005,"lon":-0.001},{"lat":0.000_005,"lon":0.001}]}
+        ]})
+        .to_string();
+        let mut server = TestServer::new("200 OK", &body).await;
+        let distance = super::distance_to_street_m(
+            Coordinate { lat: 0.0, lon: 0.0 },
+            50.0,
+            Some(server.auth()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!((distance - 0.555_975).abs() < 0.001);
+        let request = server
+            .request()
+            .await;
+        assert!(request.contains("around%3A50%2C0%2C0"));
+        assert!(request.contains("out%20geom%3B"));
+        assert!(request.contains("service"));
+    }
 
     use super::classify_building_response;
     use serde_json::json;

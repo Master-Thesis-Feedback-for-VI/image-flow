@@ -11,11 +11,13 @@ use crate::{
     requesters::{
         AuthToHost,
         nominatim::NominatimLocationData,
-        overpass::{find_nearby_intersections, inside_building},
+        overpass::{distance_to_street_m, find_nearby_intersections, inside_building},
     },
 };
 
 const MIN_INTERSECTION_NODES: usize = 2;
+const STREET_DISTANCE_THRESHOLD_M: f64 = 1.0;
+const STREET_SEARCH_RADIUS_M: f64 = 50.0;
 
 pub async fn evaluate_image_and_location_as_location_tags(
     pos: impl Into<Coordinate>,
@@ -25,9 +27,7 @@ pub async fn evaluate_image_and_location_as_location_tags(
     let location_cat = evaluate_location_as_loaction_tags(pos, auth).await;
     let image_cat = evaluate_image_as_location_tags(dominant_colors);
 
-    let mut cats = UniqueLocationTags::new();
-
-    cats.extend(location_cat);
+    let mut cats = location_cat;
     cats.extend_context_tags(image_cat);
 
     cats
@@ -58,6 +58,7 @@ pub async fn evaluate_location_as_loaction_tags(
         .map(Arc::clone);
 
     let overpass_fut = LocationTag::extract_categories_from_overpass(coordinates, overpass_auth);
+    let street_fut = distance_to_street_m(coordinates, STREET_SEARCH_RADIUS_M, auth.clone());
     let nominatim_fut = async {
         LocationTag::extract_categories_from_nominatim(coordinates, auth)
             .await
@@ -68,10 +69,23 @@ pub async fn evaluate_location_as_loaction_tags(
     };
 
     let mut categories = UniqueLocationTags::new();
-    let (overpass_category, nominatim_category) = tokio::join!(overpass_fut, nominatim_fut);
+    let (overpass_category, nominatim_category, street_distance) =
+        tokio::join!(overpass_fut, nominatim_fut, street_fut);
     categories.extend(overpass_category);
     categories.extend_context_tags(nominatim_category);
+    let street_distance = street_distance.unwrap_or_else(|error| {
+        tracing::error!(%error, "street distance lookup failed");
+        None
+    });
+    apply_street_distance(&mut categories, street_distance);
     categories
+}
+
+fn apply_street_distance(categories: &mut UniqueLocationTags, distance_m: Option<f64>) {
+    categories.remove(&LocationTag::Street);
+    if distance_m.is_some_and(|distance| (0.0..=STREET_DISTANCE_THRESHOLD_M).contains(&distance)) {
+        categories.insert(LocationTag::Street);
+    }
 }
 
 impl LocationTag {
@@ -236,6 +250,27 @@ impl LocationTag {
 #[cfg(test)]
 mod test {
     use std::sync::Arc;
+
+    #[test]
+    fn street_tag_requires_measured_distance_within_one_meter() {
+        for (distance, expected) in [
+            (None, false),
+            (Some(0.0), true),
+            (Some(0.999), true),
+            (Some(1.0), true),
+            (Some(1.001), false),
+            (Some(-1.0), false),
+            (Some(f64::NAN), false),
+        ] {
+            let mut tags = UniqueLocationTags::new_singular(LocationTag::Parking);
+            super::apply_street_distance(&mut tags, distance);
+            assert_eq!(tags.contains(LocationTag::Street), expected);
+            assert!(tags.contains(LocationTag::Parking));
+        }
+        let mut tags = UniqueLocationTags::new();
+        super::apply_street_distance(&mut tags, Some(0.5));
+        assert!(tags.contains(LocationTag::Street));
+    }
 
     use crate::{
         context::location_based_context::evaluate_location_as_loaction_tags,
