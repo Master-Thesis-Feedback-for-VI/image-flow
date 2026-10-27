@@ -9,7 +9,7 @@ use ffmpeg_next::{
     software::scaling::{self, Flags},
 };
 use futures::StreamExt;
-use image::ColorType;
+use image::{DynamicImage, RgbImage, metadata::Orientation};
 use tokio::{
     fs::{self},
     sync::{OnceCell, mpsc},
@@ -152,6 +152,7 @@ fn decode_and_send(
         .ok_or(ffmpeg::Error::StreamNotFound)?;
     let video_stream_index = input_stream.index();
     let time_base = input_stream.time_base();
+    let orientation = stream_orientation(&input_stream);
 
     debug!(
         video_stream_index,
@@ -209,7 +210,7 @@ fn decode_and_send(
                         let frame_path_disp = frame_path.clone();
                         let frame_path_disp = frame_path_disp.display();
 
-                        if let Err(e) = save_png(&rgb_frame, &frame_path) {
+                        if let Err(e) = save_oriented_png(&rgb_frame, &frame_path, orientation) {
                             warn!(error = ?e, path = %frame_path.display(), "failed to save frame png");
                         } else {
                             debug!(path = %frame_path_disp, "frame saved");
@@ -265,7 +266,66 @@ fn pts_to_duration(pts: i64, time_base: ffmpeg::Rational) -> Duration {
     Duration::nanoseconds(nanos.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64)
 }
 
-fn save_png(frame: &Video, path: impl AsRef<Path>) -> crate::Result<()> {
+fn stream_orientation(stream: &ffmpeg::Stream<'_>) -> Orientation {
+    if let Some(matrix) = stream
+        .side_data()
+        .find(|data| data.kind() == ffmpeg::codec::packet::side_data::Type::DisplayMatrix)
+    {
+        if let Some(orientation) = display_matrix_orientation(matrix.data()) {
+            return orientation;
+        }
+        warn!("Unsupported video display matrix; exporting untransformed pixels");
+        return Orientation::NoTransforms;
+    }
+
+    match stream
+        .metadata()
+        .get("rotate")
+        .and_then(|s| {
+            s.parse::<i32>()
+                .ok()
+        }) {
+        Some(angle) if angle.rem_euclid(360) == 90 => Orientation::Rotate90,
+        Some(angle) if angle.rem_euclid(360) == 180 => Orientation::Rotate180,
+        Some(angle) if angle.rem_euclid(360) == 270 => Orientation::Rotate270,
+        _ => Orientation::NoTransforms,
+    }
+}
+
+fn display_matrix_orientation(data: &[u8]) -> Option<Orientation> {
+    if data.len() < 36 {
+        return None;
+    }
+    let mut axes = [0; 4];
+    for (axis, offset) in axes
+        .iter_mut()
+        .zip([0, 4, 12, 16])
+    {
+        *axis = i32::from_ne_bytes(
+            data[offset..offset + 4]
+                .try_into()
+                .ok()?,
+        )
+        .signum();
+    }
+    match axes {
+        [1, 0, 0, 1] => Some(Orientation::NoTransforms),
+        [0, 1, -1, 0] => Some(Orientation::Rotate90),
+        [-1, 0, 0, -1] => Some(Orientation::Rotate180),
+        [0, -1, 1, 0] => Some(Orientation::Rotate270),
+        [-1, 0, 0, 1] => Some(Orientation::FlipHorizontal),
+        [1, 0, 0, -1] => Some(Orientation::FlipVertical),
+        [0, 1, 1, 0] => Some(Orientation::Rotate90FlipH),
+        [0, -1, -1, 0] => Some(Orientation::Rotate270FlipH),
+        _ => None,
+    }
+}
+
+fn save_oriented_png(
+    frame: &Video,
+    path: impl AsRef<Path>,
+    orientation: Orientation,
+) -> crate::Result<()> {
     // FFmpeg aligns each row, while the image encoder expects tightly packed RGB.
     let row_bytes = frame.width() as usize * 3;
     let pixels: Vec<u8> = frame
@@ -278,14 +338,13 @@ fn save_png(frame: &Video, path: impl AsRef<Path>) -> crate::Result<()> {
                 .copied()
         })
         .collect();
-    image::save_buffer(
-        path,
-        &pixels,
-        frame.width(),
-        frame.height(),
-        ColorType::Rgb8,
-    )
-    .map_err(crate::error::ffmpeg)
+    let rgb = RgbImage::from_raw(frame.width(), frame.height(), pixels)
+        .ok_or_else(|| crate::error::ffmpeg("Invalid RGB frame dimensions"))?;
+    let mut image = DynamicImage::ImageRgb8(rgb);
+    image.apply_orientation(orientation);
+    image
+        .save(path)
+        .map_err(crate::error::ffmpeg)
 }
 
 pub struct VideoMetadata {
@@ -518,7 +577,8 @@ mod test {
             .fill(0);
         frame.data_mut(0)[..9].copy_from_slice(&[255, 0, 0, 255, 0, 0, 255, 0, 0]);
         frame.data_mut(0)[stride..stride + 9].copy_from_slice(&[0, 255, 0, 0, 255, 0, 0, 255, 0]);
-        super::save_png(&frame, &path).expect("save RGB frame");
+        super::save_oriented_png(&frame, &path, image::metadata::Orientation::NoTransforms)
+            .expect("save RGB frame");
         let image = image::open(path)
             .expect("read PNG")
             .to_rgb8();
@@ -537,6 +597,107 @@ mod test {
                 [0, 255, 0]
             );
         }
+    }
+
+    #[test]
+    fn display_matrices_transform_png_pixels_and_dimensions() {
+        use image::metadata::Orientation;
+
+        let cases = [
+            (
+                [1, 0, 0, 1],
+                Orientation::NoTransforms,
+                (3, 2),
+                vec![1, 2, 3, 4, 5, 6],
+            ),
+            (
+                [0, 1, -1, 0],
+                Orientation::Rotate90,
+                (2, 3),
+                vec![4, 1, 5, 2, 6, 3],
+            ),
+            (
+                [-1, 0, 0, -1],
+                Orientation::Rotate180,
+                (3, 2),
+                vec![6, 5, 4, 3, 2, 1],
+            ),
+            (
+                [0, -1, 1, 0],
+                Orientation::Rotate270,
+                (2, 3),
+                vec![3, 6, 2, 5, 1, 4],
+            ),
+            (
+                [-1, 0, 0, 1],
+                Orientation::FlipHorizontal,
+                (3, 2),
+                vec![3, 2, 1, 6, 5, 4],
+            ),
+            (
+                [1, 0, 0, -1],
+                Orientation::FlipVertical,
+                (3, 2),
+                vec![4, 5, 6, 1, 2, 3],
+            ),
+            (
+                [0, 1, 1, 0],
+                Orientation::Rotate90FlipH,
+                (2, 3),
+                vec![1, 4, 2, 5, 3, 6],
+            ),
+            (
+                [0, -1, -1, 0],
+                Orientation::Rotate270FlipH,
+                (2, 3),
+                vec![6, 3, 5, 2, 4, 1],
+            ),
+        ];
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir
+            .path()
+            .join("oriented.png");
+        let mut frame = ffmpeg_next::frame::Video::new(ffmpeg_next::format::Pixel::RGB24, 3, 2);
+        let stride = frame.stride(0);
+        frame
+            .data_mut(0)
+            .fill(255);
+        frame.data_mut(0)[..9].copy_from_slice(&[1, 0, 0, 2, 0, 0, 3, 0, 0]);
+        frame.data_mut(0)[stride..stride + 9].copy_from_slice(&[4, 0, 0, 5, 0, 0, 6, 0, 0]);
+
+        for ([a, b, c, d], expected, dimensions, pixels) in cases {
+            let matrix: [i32; 9] = [
+                a * 65536,
+                b * 65536,
+                0,
+                c * 65536,
+                d * 65536,
+                0,
+                0,
+                0,
+                1 << 30,
+            ];
+            let bytes: Vec<_> = matrix
+                .into_iter()
+                .flat_map(i32::to_ne_bytes)
+                .collect();
+            let orientation = super::display_matrix_orientation(&bytes).expect("valid matrix");
+            assert_eq!(orientation, expected);
+            super::save_oriented_png(&frame, &path, orientation).expect("save upright PNG");
+            let image = image::open(&path)
+                .expect("read upright PNG")
+                .to_rgb8();
+            assert_eq!(image.dimensions(), dimensions);
+            assert_eq!(
+                image
+                    .pixels()
+                    .map(|p| p.0[0])
+                    .collect::<Vec<_>>(),
+                pixels
+            );
+        }
+        assert_eq!(super::display_matrix_orientation(&[0; 35]), None);
+        assert_eq!(super::display_matrix_orientation(&[0; 36]), None);
     }
 
     fn tiny_video(path: &Path) {
