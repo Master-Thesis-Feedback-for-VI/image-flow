@@ -222,7 +222,7 @@ async fn process_recording(
         .enumerate()
     {
         let auth = AUTH_AGENT.clone();
-        let evaluation = image_flow_evaluation_impl(*location, auth, frame, model, 4).await;
+        let evaluation = image_flow_evaluation_impl(*location, auth, frame, model, 2).await;
 
         match evaluation {
             Ok(eva) => {
@@ -504,7 +504,7 @@ mod tests {
                         .map(|sample| sample * sample)
                         .sum::<f64>()
                         / f64::from(u32::try_from(samples.len()).expect("short test audio")))
-                        .sqrt()
+                    .sqrt()
                 };
                 let ratio = rms(&output) / rms(&input);
                 assert!((ratio - 0.8).abs() < 0.03, "audio amplitude ratio: {ratio}");
