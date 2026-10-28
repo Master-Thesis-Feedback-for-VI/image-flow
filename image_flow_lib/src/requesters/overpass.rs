@@ -249,7 +249,11 @@ fn urlencoding_encode(input: &str) -> String {
     out
 }
 
-pub async fn distance_to_street_m(
+/// Signed distance from the point to the nearest road carriageway, in meters.
+///
+/// The value is the distance to the road centreline minus half of the road's
+/// width, so it is negative when the point lies on the road surface itself.
+pub async fn distance_from_carriageway_m(
     coordinates: impl Into<Coordinate>,
     radius_m: f64,
     auth: Option<Arc<AuthToHost>>,
@@ -267,6 +271,34 @@ pub async fn distance_to_street_m(
         radius_m,
         fetch_raw_overpass_data(&query, auth).await?,
     )
+}
+
+/// Half of the drivable width of a road. Uses the OSM `width` tag when it is
+/// plausible, otherwise a typical German cross-section for the highway class.
+fn carriageway_half_width_m(highway: Option<&str>, width: Option<&str>) -> f64 {
+    if let Some(width) = width
+        .and_then(|raw| {
+            raw.trim()
+                .trim_end_matches('m')
+                .trim()
+                .replace(',', ".")
+                .parse::<f64>()
+                .ok()
+        })
+        .filter(|width| (1.0..=60.0).contains(width))
+    {
+        return width / 2.0;
+    }
+
+    match highway.unwrap_or_default() {
+        "motorway" | "motorway_link" | "trunk" | "trunk_link" => 7.0,
+        "primary" | "primary_link" => 6.0,
+        "secondary" | "secondary_link" => 5.0,
+        "tertiary" | "tertiary_link" => 4.0,
+        "living_street" => 3.0,
+        "service" => 2.5,
+        _ => 3.5,
+    }
 }
 
 fn valid_coordinate(point: Coordinate) -> bool {
@@ -289,9 +321,16 @@ fn street_distance_from_response(
     struct Streets {
         elements: Vec<Street>,
     }
+    #[derive(Deserialize, Default)]
+    struct StreetTags {
+        highway: Option<String>,
+        width: Option<String>,
+    }
     #[derive(Deserialize)]
     struct Street {
         geometry: Vec<Coordinate>,
+        #[serde(default)]
+        tags: StreetTags,
     }
     if let Some(remark) = response.get("remark") {
         return Err(error::request(format!(
@@ -313,13 +352,26 @@ fn street_distance_from_response(
         {
             return Err(error::request("invalid street geometry"));
         }
+        let half_width = carriageway_half_width_m(
+            street
+                .tags
+                .highway
+                .as_deref(),
+            street
+                .tags
+                .width
+                .as_deref(),
+        );
         for segment in street
             .geometry
             .windows(2)
         {
             let distance = segment_distance_m(coordinates, segment[0], segment[1]);
             if distance <= radius_m {
-                nearest = Some(nearest.map_or(distance, |previous| previous.min(distance)));
+                let from_carriageway = distance - half_width;
+                nearest = Some(
+                    nearest.map_or(from_carriageway, |previous| previous.min(from_carriageway)),
+                );
             }
         }
     }
@@ -510,6 +562,44 @@ mod test {
     }
 
     #[test]
+    fn carriageway_half_width_prefers_plausible_osm_width_then_highway_class() {
+        use super::carriageway_half_width_m;
+        assert_eq!(
+            carriageway_half_width_m(Some("residential"), Some("6")),
+            3.0
+        );
+        assert_eq!(
+            carriageway_half_width_m(Some("residential"), Some("7,5 m")),
+            3.75
+        );
+        assert_eq!(
+            carriageway_half_width_m(Some("residential"), Some("0.2")),
+            3.5
+        );
+        assert_eq!(carriageway_half_width_m(Some("motorway"), None), 7.0);
+        assert_eq!(carriageway_half_width_m(Some("primary"), None), 6.0);
+        assert_eq!(carriageway_half_width_m(Some("secondary_link"), None), 5.0);
+        assert_eq!(carriageway_half_width_m(Some("tertiary"), None), 4.0);
+        assert_eq!(carriageway_half_width_m(Some("living_street"), None), 3.0);
+        assert_eq!(carriageway_half_width_m(Some("service"), None), 2.5);
+        assert_eq!(carriageway_half_width_m(None, None), 3.5);
+    }
+
+    #[test]
+    fn street_distance_is_negative_when_point_is_on_the_carriageway() {
+        use crate::location::coordinate_system::Coordinate;
+        let point = Coordinate { lat: 0.0, lon: 0.0 };
+        let response = serde_json::json!({"elements":[{
+            "tags":{"highway":"tertiary"},
+            "geometry":[{"lat":0.0,"lon":-0.001},{"lat":0.0,"lon":0.001}]
+        }]});
+        let distance = super::street_distance_from_response(point, 50.0, response)
+            .unwrap()
+            .unwrap();
+        assert!((distance + 4.0).abs() < 1e-6);
+    }
+
+    #[test]
     fn street_distance_rejects_partial_or_invalid_responses() {
         use crate::location::coordinate_system::Coordinate;
         let point = Coordinate { lat: 0.0, lon: 0.0 };
@@ -533,12 +623,12 @@ mod test {
     async fn street_lookup_fetches_geometry_and_returns_nearest_distance() {
         use crate::{location::coordinate_system::Coordinate, tests::http::TestServer};
         let body = serde_json::json!({"elements": [
-            {"geometry":[{"lat":0.0001,"lon":-0.001},{"lat":0.0001,"lon":0.001}]},
-            {"geometry":[{"lat":0.000_005,"lon":-0.001},{"lat":0.000_005,"lon":0.001}]}
+            {"tags":{"highway":"residential","width":"1"},"geometry":[{"lat":0.0001,"lon":-0.001},{"lat":0.0001,"lon":0.001}]},
+            {"tags":{"highway":"residential","width":"1"},"geometry":[{"lat":0.000_005,"lon":-0.001},{"lat":0.000_005,"lon":0.001}]}
         ]})
         .to_string();
         let mut server = TestServer::new("200 OK", &body).await;
-        let distance = super::distance_to_street_m(
+        let distance = super::distance_from_carriageway_m(
             Coordinate { lat: 0.0, lon: 0.0 },
             50.0,
             Some(server.auth()),
@@ -546,7 +636,7 @@ mod test {
         .await
         .unwrap()
         .unwrap();
-        assert!((distance - 0.555_975).abs() < 0.001);
+        assert!((distance - (0.555_975 - 0.5)).abs() < 0.001);
         let request = server
             .request()
             .await;

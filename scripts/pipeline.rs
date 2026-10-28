@@ -295,7 +295,7 @@ fn export_quieter_recording(input: &Path, output: &Path) -> std::io::Result<()> 
             "-c:a",
             "aac",
             "-filter:a",
-            "volume=0.8",
+            "volume=0.5",
         ])
         .arg(output)
         .output()
