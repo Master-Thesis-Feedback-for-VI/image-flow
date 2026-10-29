@@ -183,11 +183,20 @@ impl ImageDetections {
     }
 
     #[instrument]
-    pub fn from_detection_result(res: &DetectionResults, depth_map: &DepthMap) -> Self {
+    pub fn from_detection_result(
+        res: &DetectionResults,
+        depth_map: &DepthMap,
+        confidence_limit: f32,
+    ) -> Self {
         let mut detections = Vec::new();
 
         if let Some(boxes) = &res.boxes {
             for i in 0..boxes.len() {
+                let conf = boxes.conf()[i];
+                if conf < confidence_limit {
+                    continue;
+                }
+
                 let xyxy_tmp = boxes.xyxy();
                 let xyxy_row = xyxy_tmp.row(i);
                 let xyxy = BoundingBox {
@@ -198,7 +207,6 @@ impl ImageDetections {
                 };
 
                 let cls = boxes.cls()[i] as usize;
-                let conf = boxes.conf()[i];
                 let name = res
                     .names
                     .get(&cls)
@@ -587,7 +595,7 @@ mod tests {
             (4, 4),
         ));
         let mut results = crate::tests::empty_detection_result();
-        assert!(ImageDetections::from_detection_result(&results, &depth).is_empty());
+        assert!(ImageDetections::from_detection_result(&results, &depth, 0.3).is_empty());
         results.names = Arc::new(HashMap::from([
             (0, "person".into()),
             (1, "bicycle".into()),
@@ -604,7 +612,7 @@ mod tests {
             ],
             (4, 4),
         ));
-        let detections = ImageDetections::from_detection_result(&results, &depth);
+        let detections = ImageDetections::from_detection_result(&results, &depth, 0.3);
         assert_eq!(detections.len(), 3);
         assert_eq!(
             detections

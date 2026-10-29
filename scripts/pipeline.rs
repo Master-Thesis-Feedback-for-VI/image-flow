@@ -222,7 +222,7 @@ async fn process_recording(
         .enumerate()
     {
         let auth = AUTH_AGENT.clone();
-        let evaluation = image_flow_evaluation_impl(*location, auth, frame, model, 2).await;
+        let evaluation = image_flow_evaluation_impl(*location, auth, frame, model, 2, 0.3).await;
 
         match evaluation {
             Ok(eva) => {
