@@ -15,10 +15,10 @@ use serde::{Deserialize, Serialize};
 )]
 pub enum LocationTag {
     Railway,
-    Street,
     Parking,
-    Intersection,
+    Street,
     Pedestrian,
+    Intersection,
     Forest,
     Outside,
     Inside,

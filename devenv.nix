@@ -39,16 +39,6 @@
     };
   };
 
-  android = {
-    enable = true;
-    emulator.enable = false;
-    systemImages.enable = false;
-    ndk = {
-      enable = true;
-      version = [ "26.1.10909125" ];
-    };
-  };
-
   dotenv = {
     enable = true;
     filename = [".env" ".env.production" ".env.development"];

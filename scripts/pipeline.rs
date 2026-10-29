@@ -222,7 +222,7 @@ async fn process_recording(
         .enumerate()
     {
         let auth = AUTH_AGENT.clone();
-        let evaluation = image_flow_evaluation_impl(*location, auth, frame, model, 4).await;
+        let evaluation = image_flow_evaluation_impl(*location, auth, frame, model, 2, 0.3).await;
 
         match evaluation {
             Ok(eva) => {
@@ -295,7 +295,7 @@ fn export_quieter_recording(input: &Path, output: &Path) -> std::io::Result<()> 
             "-c:a",
             "aac",
             "-filter:a",
-            "volume=0.8",
+            "volume=0.5",
         ])
         .arg(output)
         .output()
@@ -504,7 +504,7 @@ mod tests {
                         .map(|sample| sample * sample)
                         .sum::<f64>()
                         / f64::from(u32::try_from(samples.len()).expect("short test audio")))
-                        .sqrt()
+                    .sqrt()
                 };
                 let ratio = rms(&output) / rms(&input);
                 assert!((ratio - 0.8).abs() < 0.03, "audio amplitude ratio: {ratio}");

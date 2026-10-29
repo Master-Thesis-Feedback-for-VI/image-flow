@@ -102,7 +102,7 @@ impl DominantColor {
     }
 
     pub fn is_close_to_forest_green(self) -> bool {
-        self.is_close_to_color(FOREST_GREEN, 50.0, 0.50, 0.60)
+        self.is_close_to_color(FOREST_GREEN, 40.0, 0.40, 0.50)
     }
 }
 
@@ -133,7 +133,7 @@ pub async fn dominant_colors(
 
     tokio::task::spawn_blocking(move || -> crate::Result<DominantColors> {
         let img = image::open(frame_path)?;
-        let small = img.resize(200, 200, FilterType::Triangle);
+        let small = img.resize(300, 300, FilterType::Triangle);
         let rgb_image = small.to_rgb8();
         let pixels = rgb_image.into_raw();
 
