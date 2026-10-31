@@ -108,10 +108,6 @@ impl DominantColor {
             .into_format::<f32>()
             .into_color();
 
-        // Foliage ranges from yellow-green/olive to cool green, and shadows or
-        // haze can substantially reduce its saturation. Avoid a distance from a
-        // single saturated reference, which misses these common vegetation colors.
-        // Exclude near-neutral and nearly black colors whose hue is unreliable.
         (65.0..=165.0).contains(
             &hsv.hue
                 .into_positive_degrees(),
@@ -147,7 +143,7 @@ pub async fn dominant_colors(
 
     tokio::task::spawn_blocking(move || -> crate::Result<DominantColors> {
         let img = image::open(frame_path)?;
-        let small = img.resize(200, 200, FilterType::Triangle);
+        let small = img.resize(300, 300, FilterType::Triangle);
         let rgb_image = small.to_rgb8();
         let pixels = rgb_image.into_raw();
 

@@ -214,10 +214,12 @@ impl ImageRecognizer {
     /// The API from Ulatralytics is weird here. Per image 1 Results struct is created containing
     /// all Results and detections from one image. So having multiple makes no sense and there
     /// always only exists one Results even if nothing is detected!
-    pub async fn predict_objects(&self, path: impl AsRef<Path>) -> crate::Result<ImageDetections> {
-        let path_to_pred = path
-            .as_ref()
-            .to_path_buf();
+    pub async fn predict_objects(
+        &self,
+        path: &Path,
+        confidence_limit: f32,
+    ) -> crate::Result<ImageDetections> {
+        let path_to_pred = path.to_path_buf();
         let obj_detection_model = Arc::clone(&self.obj_detection);
 
         let object_prediction_fut =
@@ -230,7 +232,7 @@ impl ImageRecognizer {
                 Ok(predictions)
             });
 
-        let depth_pred_fut = self.predict_depth(&path);
+        let depth_pred_fut = self.predict_depth(path);
 
         let (object_prediction, depth_pred) = tokio::join!(object_prediction_fut, depth_pred_fut);
         let mut object_prediction = object_prediction??;
@@ -238,7 +240,8 @@ impl ImageRecognizer {
         let result = object_prediction.remove(0);
         let depth_pred = depth_pred?;
 
-        let image_detections = ImageDetections::from_detection_result(&result, &depth_pred);
+        let image_detections =
+            ImageDetections::from_detection_result(&result, &depth_pred, confidence_limit);
         Ok(image_detections)
     }
 
@@ -456,7 +459,9 @@ mod tests {
                 assert_eq!(url.host_str(), Some("github.com"));
                 assert_eq!(
                     url.as_str(),
-                    format!("https://github.com/ultralytics/assets/releases/download/v8.4.0/{name}")
+                    format!(
+                        "https://github.com/ultralytics/assets/releases/download/v8.4.0/{name}"
+                    )
                 );
             }
         }

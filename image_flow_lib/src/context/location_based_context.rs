@@ -11,12 +11,12 @@ use crate::{
     requesters::{
         AuthToHost,
         nominatim::NominatimLocationData,
-        overpass::{distance_to_street_m, find_nearby_intersections, inside_building},
+        overpass::{distance_from_carriageway_m, find_nearby_intersections, inside_building},
     },
 };
 
 const MIN_INTERSECTION_NODES: usize = 2;
-const STREET_DISTANCE_THRESHOLD_M: f64 = 1.0;
+const STREET_GPS_TOLERANCE_M: f64 = 2.0;
 const STREET_SEARCH_RADIUS_M: f64 = 50.0;
 
 pub async fn evaluate_image_and_location_as_location_tags(
@@ -58,7 +58,8 @@ pub async fn evaluate_location_as_loaction_tags(
         .map(Arc::clone);
 
     let overpass_fut = LocationTag::extract_categories_from_overpass(coordinates, overpass_auth);
-    let street_fut = distance_to_street_m(coordinates, STREET_SEARCH_RADIUS_M, auth.clone());
+    let street_fut =
+        distance_from_carriageway_m(coordinates, STREET_SEARCH_RADIUS_M, auth.clone());
     let nominatim_fut = async {
         LocationTag::extract_categories_from_nominatim(coordinates, auth)
             .await
@@ -81,10 +82,17 @@ pub async fn evaluate_location_as_loaction_tags(
     categories
 }
 
-fn apply_street_distance(categories: &mut UniqueLocationTags, distance_m: Option<f64>) {
+/// `distance_from_carriageway_m` is negative on the road surface. A camera within
+/// GPS tolerance of that surface is on the street, which is outdoors, so this
+/// also removes any building containment caused by GPS drift.
+fn apply_street_distance(
+    categories: &mut UniqueLocationTags,
+    distance_from_carriageway_m: Option<f64>,
+) {
     categories.remove(&LocationTag::Street);
-    if distance_m.is_some_and(|distance| (0.0..=STREET_DISTANCE_THRESHOLD_M).contains(&distance)) {
+    if distance_from_carriageway_m.is_some_and(|distance| distance <= STREET_GPS_TOLERANCE_M) {
         categories.insert(LocationTag::Street);
+        categories.insert(LocationTag::Outside);
     }
 }
 
@@ -252,14 +260,13 @@ mod test {
     use std::sync::Arc;
 
     #[test]
-    fn street_tag_requires_measured_distance_within_one_meter() {
+    fn street_tag_requires_carriageway_within_gps_tolerance() {
         for (distance, expected) in [
             (None, false),
+            (Some(-4.0), true),
             (Some(0.0), true),
-            (Some(0.999), true),
-            (Some(1.0), true),
-            (Some(1.001), false),
-            (Some(-1.0), false),
+            (Some(2.0), true),
+            (Some(2.001), false),
             (Some(f64::NAN), false),
         ] {
             let mut tags = UniqueLocationTags::new_singular(LocationTag::Parking);
@@ -267,9 +274,20 @@ mod test {
             assert_eq!(tags.contains(LocationTag::Street), expected);
             assert!(tags.contains(LocationTag::Parking));
         }
-        let mut tags = UniqueLocationTags::new();
-        super::apply_street_distance(&mut tags, Some(0.5));
+    }
+
+    #[test]
+    fn standing_on_the_street_overrides_building_containment() {
+        let mut tags = UniqueLocationTags::new_singular(LocationTag::Inside);
+        super::apply_street_distance(&mut tags, Some(-1.0));
         assert!(tags.contains(LocationTag::Street));
+        assert!(tags.contains(LocationTag::Outside));
+        assert!(!tags.contains(LocationTag::Inside));
+
+        let mut tags = UniqueLocationTags::new_singular(LocationTag::Inside);
+        super::apply_street_distance(&mut tags, Some(5.0));
+        assert!(tags.contains(LocationTag::Inside));
+        assert!(!tags.contains(LocationTag::Street));
     }
 
     use crate::{

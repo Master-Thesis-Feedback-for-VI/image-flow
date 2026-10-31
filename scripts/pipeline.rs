@@ -14,6 +14,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::BufWriter,
     path::{Path, PathBuf},
+    process::Command,
     sync::{Arc, LazyLock},
     time::Duration,
 };
@@ -51,16 +52,12 @@ pub static AUTH_AGENT: LazyLock<Option<AuthToHost>> = LazyLock::new(|| {
 
 #[derive(Parser, Debug)]
 struct Args {
-    /// Recording ZIP, or a folder of ZIPs containing a .mov and `gps_timestamps.csv`.
     #[arg(short, long)]
     input: PathBuf,
     #[arg(long)]
-    /// Frame output directory (one subfolder per ZIP for folder input).
     output: Option<PathBuf>,
     #[arg(short, long)]
-    /// Result directory (one subfolder and ZIP per recording for folder input).
     serialized_output: PathBuf,
-    /// Append frame and recording errors as JSON lines to this file.
     #[arg(long, default_value = "pipeline-errors.log")]
     error_log: PathBuf,
 }
@@ -225,7 +222,7 @@ async fn process_recording(
         .enumerate()
     {
         let auth = AUTH_AGENT.clone();
-        let evaluation = image_flow_evaluation_impl(*location, auth, frame, model, 4).await;
+        let evaluation = image_flow_evaluation_impl(*location, auth, frame, model, 2, 0.3).await;
 
         match evaluation {
             Ok(eva) => {
@@ -237,7 +234,6 @@ async fn process_recording(
                 let evaluated =
                     ImageFlowEvaluationForRecording::new(Arc::new(eva), time_diff, *location);
 
-                // println!("This data was captured:\n{evaluated:#?}");
                 unique_geo_cat_collection.push(evaluated);
             }
             Err(e) => {
@@ -270,7 +266,7 @@ async fn process_recording(
     let movie_name = args
         .serialized_output
         .join("recording.mov");
-    fs::copy(&video, movie_name)?;
+    export_quieter_recording(&video, &movie_name)?;
 
     let dst_file = args
         .serialized_output
@@ -284,6 +280,41 @@ async fn process_recording(
             .join(format!("{dst_file}.zip")),
     )?;
 
+    Ok(())
+}
+
+fn export_quieter_recording(input: &Path, output: &Path) -> std::io::Result<()> {
+    let result = Command::new("ffmpeg")
+        .args(["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i"])
+        .arg(input)
+        .args([
+            "-map",
+            "0",
+            "-c",
+            "copy",
+            "-c:a",
+            "aac",
+            "-filter:a",
+            "volume=0.5",
+        ])
+        .arg(output)
+        .output()
+        .map_err(|error| {
+            std::io::Error::new(
+                error.kind(),
+                format!("Failed to run ffmpeg for audio export: {error}"),
+            )
+        })?;
+    if !result
+        .status
+        .success()
+    {
+        return Err(std::io::Error::other(format!(
+            "Failed to export quieter recording ({}): {}",
+            result.status,
+            String::from_utf8_lossy(&result.stderr)
+        )));
+    }
     Ok(())
 }
 
@@ -351,7 +382,6 @@ fn extract_recording(
         .into());
     }
 
-    // Only extract the two inputs, using fixed paths rather than archive member names.
     let video = destination.join("recording.mov");
     let csv = destination.join("gps_timestamps.csv");
     for (index, path) in [(*video_index, &video), (*csv_index, &csv)] {
@@ -390,7 +420,6 @@ fn zip_folder(
             .as_os_str()
             .is_empty()
         {
-            // Preserve empty directories.
             zip.add_directory(name.to_string_lossy(), options)?;
         }
     }
@@ -402,6 +431,92 @@ fn zip_folder(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exported_recording_is_quieter_and_supports_silent_video() {
+        let dir = tempdir().expect("temporary directory");
+        for with_audio in [true, false] {
+            let input = dir
+                .path()
+                .join("input.mov");
+            let output = dir
+                .path()
+                .join("output.mov");
+            let mut generate = Command::new("ffmpeg");
+            generate.args([
+                "-nostdin",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=size=16x16:rate=10:duration=1",
+            ]);
+            if with_audio {
+                generate.args([
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=frequency=440:duration=1",
+                    "-c:a",
+                    "pcm_s16le",
+                ]);
+            }
+            let result = generate
+                .args(["-c:v", "mpeg4"])
+                .arg(&input)
+                .output()
+                .expect("ffmpeg must be installed");
+            assert!(
+                result
+                    .status
+                    .success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            let original = fs::read(&input).expect("original video");
+            export_quieter_recording(&input, &output).expect("export recording");
+            assert_eq!(fs::read(&input).expect("unchanged input"), original);
+
+            if with_audio {
+                let rms = |path: &Path| {
+                    let decoded = Command::new("ffmpeg")
+                        .args(["-nostdin", "-loglevel", "error", "-i"])
+                        .arg(path)
+                        .args(["-vn", "-f", "f32le", "-c:a", "pcm_f32le", "-"])
+                        .output()
+                        .expect("decode audio");
+                    assert!(
+                        decoded
+                            .status
+                            .success()
+                    );
+                    let samples: Vec<f64> = decoded
+                        .stdout
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|bytes| f64::from(f32::from_le_bytes(*bytes)))
+                        .collect();
+                    (samples
+                        .iter()
+                        .map(|sample| sample * sample)
+                        .sum::<f64>()
+                        / f64::from(u32::try_from(samples.len()).expect("short test audio")))
+                    .sqrt()
+                };
+                let ratio = rms(&output) / rms(&input);
+                assert!((ratio - 0.8).abs() < 0.03, "audio amplitude ratio: {ratio}");
+            }
+            assert!(
+                fs::metadata(&output)
+                    .expect("exported video")
+                    .len()
+                    > 0
+            );
+        }
+    }
 
     #[test]
     fn error_log_option_has_default_and_accepts_custom_path() {
