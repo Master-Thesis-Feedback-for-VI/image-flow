@@ -8,6 +8,7 @@ use palette::cast::from_component_slice;
 use palette::{Hsv, IntoColor, Lab, Srgb};
 use tracing::instrument;
 
+#[cfg(test)]
 const FOREST_GREEN: Srgb<u8> = Srgb::new(32, 150, 32);
 
 #[derive(Debug)]
@@ -102,7 +103,20 @@ impl DominantColor {
     }
 
     pub fn is_close_to_forest_green(self) -> bool {
-        self.is_close_to_color(FOREST_GREEN, 50.0, 0.50, 0.60)
+        let hsv: Hsv = self
+            .rgb
+            .into_format::<f32>()
+            .into_color();
+
+        // Foliage ranges from yellow-green/olive to cool green, and shadows or
+        // haze can substantially reduce its saturation. Avoid a distance from a
+        // single saturated reference, which misses these common vegetation colors.
+        // Exclude near-neutral and nearly black colors whose hue is unreliable.
+        (65.0..=165.0).contains(
+            &hsv.hue
+                .into_positive_degrees(),
+        ) && hsv.saturation >= 0.15
+            && hsv.value >= 0.08
     }
 }
 
@@ -251,6 +265,61 @@ mod tests {
                 .is_err()
             );
         }
+    }
+
+    #[test]
+    fn foliage_colors_include_muted_olive_and_shadowed_greens() {
+        for rgb in [
+            Srgb::new(110, 135, 105), // muted foliage
+            Srgb::new(110, 120, 50),  // olive foliage
+            Srgb::new(20, 35, 18),    // shadowed foliage
+            Srgb::new(80, 200, 60),   // sunlit foliage
+            FOREST_GREEN,
+        ] {
+            let colors: DominantColors = std::iter::once(color(rgb)).collect();
+            assert!(colors.any_close_to_forest_green(), "missed {rgb:?}");
+            assert!(evaluate_image_as_location_tags(&colors).contains(LocationTag::Forest));
+        }
+    }
+
+    #[test]
+    fn foliage_colors_exclude_neutrals_and_other_hues() {
+        for rgb in [
+            Srgb::new(0, 0, 0),
+            Srgb::new(120, 120, 120),
+            Srgb::new(240, 245, 240),
+            Srgb::new(2, 5, 2),
+            Srgb::new(150, 100, 50),
+            Srgb::new(255, 255, 0),
+            Srgb::new(0, 255, 255),
+            Srgb::new(0, 0, 255),
+            Srgb::new(255, 0, 0),
+        ] {
+            assert!(!color(rgb).is_close_to_forest_green(), "matched {rgb:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn muted_green_image_is_classified_as_forest() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir
+            .path()
+            .join("muted-foliage.png");
+        image::RgbImage::from_fn(32, 32, |x, _| {
+            if x < 24 {
+                image::Rgb([110, 135, 105])
+            } else {
+                image::Rgb([110, 120, 50])
+            }
+        })
+        .save(&path)
+        .expect("save foliage fixture");
+        let colors = dominant_colors(path, 2)
+            .await
+            .expect("extract colors");
+        let tags = evaluate_image_as_location_tags(&colors);
+        assert!(tags.contains(LocationTag::Forest));
+        assert!(tags.contains(LocationTag::Outside));
     }
 
     #[test]

@@ -47,9 +47,7 @@ pub(crate) fn evaluate_image_into_location_tags(
         categories.extend([LocationTag::Intersection, LocationTag::Outside]);
     }
 
-    let in_forest = dominant_colors
-        .iter()
-        .any(|color| color.is_close_to_forest_green());
+    let in_forest = dominant_colors.any_close_to_forest_green();
     if in_forest {
         categories.extend([LocationTag::Outside, LocationTag::Forest]);
     }
