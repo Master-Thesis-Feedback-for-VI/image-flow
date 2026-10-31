@@ -10,7 +10,6 @@ use crate::image::depth::DepthMap;
 pub enum DetectionType {
     Bench,
     Bicycle,
-    Car,
     Chair,
     Cup,
     DiningTable,
@@ -22,6 +21,11 @@ pub enum DetectionType {
     Keyboard,
     Cyclist,
 
+    Car,
+    Truck,
+    Motorcycle,
+    Bus,
+
     Unknown(String),
 }
 
@@ -31,7 +35,6 @@ impl DetectionType {
         match name.as_str() {
             "person" => Self::Person,
             "traffic light" => Self::TrafficLight,
-            "car" => Self::Car,
             "bicycle" => Self::Bicycle,
             "bench" => Self::Bench,
             "chair" => Self::Chair,
@@ -41,6 +44,12 @@ impl DetectionType {
             "laptop" => Self::Laptop,
             "tv" => Self::Tv,
             "keyboard" => Self::Keyboard,
+
+            "car" => Self::Car,
+            "truck" => Self::Truck,
+            "motorcycle" => Self::Motorcycle,
+            "bus" => Self::Bus,
+
             _ => Self::Unknown(name),
         }
     }
