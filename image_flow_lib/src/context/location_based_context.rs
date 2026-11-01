@@ -155,6 +155,9 @@ impl LocationTag {
             | "residential" | "living_street" | "cycleway" => {
                 categories.insert(Self::Street);
             }
+            "railway" | "ticket_validator" | "platform" => {
+                categories.insert(Self::Railway);
+            }
             _ => {
                 let msg = format!(
                     "New location type: [[{location_type}]],\ncheck it out here: {}",
@@ -179,7 +182,7 @@ impl LocationTag {
             "highway" => {
                 categories.insert(Self::Street);
             }
-            "railway" => {
+            "railway" | "ticket_validator" | "platform" => {
                 categories.insert(Self::Railway);
             }
             "building" | "place" | "amenity" | "yes" | "historic" | "tourism" | "shop"
