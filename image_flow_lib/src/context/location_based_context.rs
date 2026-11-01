@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use palette::cast::ComponentsInto;
 use tracing::{Span, instrument};
 
 use crate::{
@@ -58,8 +59,7 @@ pub async fn evaluate_location_as_loaction_tags(
         .map(Arc::clone);
 
     let overpass_fut = LocationTag::extract_categories_from_overpass(coordinates, overpass_auth);
-    let street_fut =
-        distance_from_carriageway_m(coordinates, STREET_SEARCH_RADIUS_M, auth.clone());
+    let street_fut = distance_from_carriageway_m(coordinates, STREET_SEARCH_RADIUS_M, auth.clone());
     let nominatim_fut = async {
         LocationTag::extract_categories_from_nominatim(coordinates, auth)
             .await
@@ -89,7 +89,9 @@ fn apply_street_distance(
     categories: &mut UniqueLocationTags,
     distance_from_carriageway_m: Option<f64>,
 ) {
-    categories.remove(&LocationTag::Street);
+    if categories.contains(LocationTag::Street) {
+        return;
+    }
     if distance_from_carriageway_m.is_some_and(|distance| distance <= STREET_GPS_TOLERANCE_M) {
         categories.insert(LocationTag::Street);
         categories.insert(LocationTag::Outside);
@@ -386,7 +388,11 @@ mod test {
             .unwrap();
 
             let tags = LocationTag::categories_from_nominatim_data(&data).unwrap();
-            assert_eq!(tags.iter().count(), expected_tags.len());
+            assert_eq!(
+                tags.iter()
+                    .count(),
+                expected_tags.len()
+            );
             for tag in expected_tags {
                 assert!(tags.contains(tag));
             }
