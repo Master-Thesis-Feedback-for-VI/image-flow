@@ -1,42 +1,51 @@
 # Image Flow
 
-Image Flow is a library for detecting objects and inferring distance in cross
-platform way. The only requirement is that ONNX can run on the given architecture.
-Additionally, this library provides features for categorizing a coordinate and/or an
-image into a set of predefined categories.
+Image Flow is a Rust library for object detection, monocular depth estimation,
+and geographic context classification using images and OpenStreetMap data. It
+also supports video/GPS processing and UniFFI bindings for mobile applications.
+The [Platypus app](https://github.com/Master-Thesis-Feedback-for-VI/Platypus-Apple)
+uses it to help people with vision impairment navigate their environment.
 
-As an example usage of this library can be found in
-[this](https://github.com/Master-Thesis-Feedback-for-VI/Platypus-Apple) app.
-It uses the features for helping individuals with vision impairment to better
-navigate their environment.
+The workspace contains the `image_flow_lib` package (imported as `image_flow`)
+and `uniffi-bindgen-runner` for generating bindings.
 
-The core API is this function:
-```rust
-#[uniffi::export(async_runtime = "tokio")]
-pub async fn image_flow_evaluation(
-    location: Coordinate,
-    auth: Option<AuthToHost>,
-    img_path: &str,
-    image_recognizer: Arc<ImageRecognizer>,
-    amount: u32,
-    confidence_limit: f32,
-) -> DefaultResult<ImageFlowEvaluation, ImageFlowError> {
-  ...
-}
+**Start with the [library guide](image_flow_lib/README.md)** for Rust examples,
+models, feature flags, map configuration, detection/depth results, GPS input,
+frame ownership, JSON formats, errors, and mobile bindings.
+
+Generate the API reference, including the guide and public-item documentation:
+
+```sh
+cargo doc -p image_flow_lib --lib --no-default-features --no-deps --open
 ```
 
-This creates a struct which contain the location tags and the detections of that
-image.
+You should activate devenv. Omit `--no-default-features` to include video support.
 
 ## Pipeline Script
 
-By running `just pipeline_all` a CLI is started which processes all zip files in
-`sample_data/*.zip`. A zip file consists of a video file and a JSON file with
-a lot of GPS tags. It then gets processed into another JSON which describes which
-objects are detected where and what location tag this system assigns to each frame.
-We can use that outputted file in the
-[Platypus-App](https://github.com/Master-Thesis-Feedback-for-VI/Platypus-Apple)
-as a simulation.
+The pipeline accepts one ZIP archive or a directory of ZIP archives. Each input
+must contain exactly one `.mov` video and one `gps_timestamps.csv` in the same
+recording folder. The CSV uses Unix-second timestamps and the columns
+`timestamp,latitude,longitude`.
+
+```sh
+cargo run -p image_flow_lib --bin pipeline --release --features "video,cli" -- \
+  --input sample_data \
+  --output pipeline_out/work \
+  --serialized-output pipeline_out/results \
+  --error-log pipeline_out/errors.log
+```
+
+It samples frames every 400 ms, pairs them with GPS, and evaluates each frame
+using large object/depth models. Each recording produces `content.json`, a
+`recording.mov` with reduced audio volume, and a ZIP of the output folder for
+playback in the Platypus app. With directory input, outputs are grouped by input
+filename stem. Model files are reused in `--output` when supplied; otherwise
+they are downloaded into temporary storage. Frame failures are logged and
+skipped; recording failures are logged while remaining archives continue.
+
+`just pipeline_all` runs this on `sample_data/` after removing the existing
+`out/` and `pipeline_out/` directories.
 
 ## Tests
 

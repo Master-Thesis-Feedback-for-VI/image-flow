@@ -1,3 +1,9 @@
+//! `FFmpeg` video metadata, streaming PNG export, and nearest-sample GPS pairing.
+//!
+//! Available with the default `video` feature. Exported [`FramePath`] values
+//! delete their files on drop unless cleanup is explicitly disabled. Frame
+//! offsets are relative to the first timestamped decoded frame.
+
 use std::{ops::Deref, path::Path};
 
 use chrono::Duration;
@@ -25,6 +31,10 @@ use crate::{
     },
 };
 
+/// Collected `(coordinate, frame)` pairs matched within ±400 milliseconds.
+///
+/// Read-only vector access is available through `Deref`. Dropping this
+/// collection also drops its frame paths, deleting their files by default.
 pub struct ImageGPSZip {
     zipped_content: Vec<(Coordinate, FramePath)>,
 }
@@ -38,8 +48,16 @@ impl Deref for ImageGPSZip {
 }
 
 impl ImageGPSZip {
+    /// Export video frames and pair them with the nearest GPS sample.
+    ///
+    /// Uses a positive `capture_interval` and creates `storage_path` if needed.
+    /// Frames without a GPS sample within an inclusive ±400 ms window are
+    /// discarded and their files deleted. Ties choose the first GPS row. No GPS
+    /// interpolation is performed; video and GPS offsets must share a start time.
+    ///
     /// # Errors
-    /// TODO
+    /// Returns directory-creation or video-decoding errors received from the
+    /// export stream. Individual PNG save errors are logged by the exporter.
     #[instrument(skip_all)]
     pub async fn from_video_and_gps(
         video_path: impl AsRef<Path>,
@@ -71,6 +89,7 @@ impl ImageGPSZip {
         })
     }
 
+    /// Disable deletion on drop for every frame retained in this collection.
     pub fn do_not_remove_frames(&mut self) {
         for content in &mut self.zipped_content {
             content
@@ -82,8 +101,21 @@ impl ImageGPSZip {
 
 static ONCE: OnceCell<bool> = OnceCell::const_new();
 
+/// Stream sampled PNG frame paths from a video through a bounded channel.
+///
+/// Creates `temporary_storage` as needed. Use a positive `capture_interval`;
+/// offsets are relative to the first timestamped decoded frame. PNG names encode
+/// offsets in milliseconds (for example, `000000400s.png`). Display rotation and
+/// reflection metadata are applied before saving. Each yielded [`FramePath`]
+/// deletes its file on drop unless its cleanup flag is disabled.
+///
+/// Directory/decode failures are yielded as `Err` items. PNG save failures are
+/// logged and can still yield a path whose file was not written. Decoding runs
+/// on a blocking worker with a 16-item channel for backpressure.
+///
 /// # Panics
-/// If FFMPEG cant init this will crash surely.
+/// Panics when called outside a Tokio runtime. `FFmpeg` initialization failure
+/// panics in the spawned task rather than yielding an error item.
 #[instrument(skip(video_source_path, temporary_storage), fields(video_path = %video_source_path.as_ref().display()))]
 pub fn export_images_from_video(
     video_source_path: impl AsRef<Path>,
@@ -347,14 +379,20 @@ fn save_oriented_png(
         .map_err(crate::error::ffmpeg)
 }
 
+/// File name and container duration, rounded to whole seconds.
 pub struct VideoMetadata {
+    /// File name including extension, without parent directories.
     pub name: String,
+    /// Container duration rounded to the nearest whole second.
     pub duration: Duration,
 }
 
 impl VideoMetadata {
+    /// Read a video's file name and container duration on a blocking worker.
+    ///
     /// # Errors
-    /// TODO
+    /// Returns an error if the path has no UTF-8 file name, `FFmpeg` cannot open
+    /// the input, or the worker task fails.
     pub async fn open<P>(path: P) -> crate::Result<Self>
     where
         P: AsRef<Path>,

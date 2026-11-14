@@ -1,3 +1,10 @@
+//! Object labels, bounding boxes, and depth-enriched detections.
+//!
+//! [`ImageDetections`] filters model results by confidence, merges overlapping
+//! person/bicycle pairs, and removes later same-class boxes with `IoU` at least
+//! `0.9`. Record fields are private in Rust but available through Serde and
+//! generated `UniFFI` records.
+
 use std::{fmt::Display, ops::Deref};
 
 use serde::{Deserialize, Serialize};
@@ -6,26 +13,44 @@ use ultralytics_inference::Results as DetectionResults;
 
 use crate::image::depth::DepthMap;
 
+/// Recognized object classes plus a catch-all for unmapped model labels.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, uniffi::Enum, Eq, PartialOrd, Ord)]
 pub enum DetectionType {
+    /// Bench.
     Bench,
+    /// Bicycle without a merged rider.
     Bicycle,
+    /// Chair.
     Chair,
+    /// Cup.
     Cup,
+    /// Dining table.
     DiningTable,
+    /// Handbag.
     Handbag,
+    /// Laptop computer.
     Laptop,
+    /// Person without a merged bicycle.
     Person,
+    /// Traffic light.
     TrafficLight,
+    /// Television.
     Tv,
+    /// Computer keyboard.
     Keyboard,
+    /// A person/bicycle pair combined during postprocessing.
     Cyclist,
 
+    /// Car.
     Car,
+    /// Truck.
     Truck,
+    /// Motorcycle.
     Motorcycle,
+    /// Bus.
     Bus,
 
+    /// An unmapped model label, normalized to lowercase during inference conversion.
     Unknown(String),
 }
 
@@ -55,6 +80,10 @@ impl DetectionType {
     }
 }
 
+/// Axis-aligned bounds in image pixels: `(x1, y1)` to `(x2, y2)`.
+///
+/// Fields are private in Rust; Serde and `UniFFI` records expose their named values.
+/// Geometry methods clamp negative widths/heights to zero.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, uniffi::Record)]
 pub struct BoundingBox {
     x1: f32,
@@ -90,26 +119,31 @@ impl BoundingBox {
         }
     }
 
+    /// Test overlap, including boxes that only touch at an edge or corner.
     #[must_use]
     pub const fn intersects(self, other: Self) -> bool {
         self.x1 <= other.x2 && self.x2 >= other.x1 && self.y1 <= other.y2 && self.y2 >= other.y1
     }
 
+    /// Return the nonnegative horizontal extent in pixels.
     #[must_use]
     pub const fn width(self) -> f32 {
         (self.x2 - self.x1).max(0.0)
     }
 
+    /// Return the nonnegative vertical extent in pixels.
     #[must_use]
     pub const fn height(self) -> f32 {
         (self.y2 - self.y1).max(0.0)
     }
 
+    /// Return width multiplied by height, in square pixels.
     #[must_use]
     pub const fn area(self) -> f32 {
         self.width() * self.height()
     }
 
+    /// Return the area shared by both boxes, or zero for disjoint/touching boxes.
     #[must_use]
     pub const fn intersection_area(self, other: Self) -> f32 {
         let width = (self
@@ -130,11 +164,13 @@ impl BoundingBox {
         width * height
     }
 
+    /// Return the sum of the areas minus their intersection area.
     #[must_use]
     pub const fn union_area(self, other: Self) -> f32 {
         self.area() + other.area() - self.intersection_area(other)
     }
 
+    /// Return intersection-over-union, or zero when the union area is nonpositive.
     #[must_use]
     pub const fn iou(self, other: Self) -> f32 {
         let intersection = self.intersection_area(other);
@@ -147,12 +183,21 @@ impl BoundingBox {
         intersection / union
     }
 
+    /// Test whether intersection-over-union is at least `threshold`.
+    ///
+    /// The threshold is compared directly and is not validated.
     #[must_use]
     pub const fn is_similar_bb(self, other: Self, threshold: f32) -> bool {
         self.iou(other) >= threshold
     }
 }
 
+/// One object's label, pixel bounds, sampled depth, and confidence.
+///
+/// Serde/`UniFFI` fields are `name`, `xyxy`, `distance`, and `confidence`. `distance`
+/// is depth at the floored box center (meters for the supported YOLO depth
+/// models), or the average of both distances for a merged cyclist. Fields are
+/// private to Rust callers; use Serde or `Debug` to inspect all values.
 #[derive(Debug, Clone, Serialize, Deserialize, uniffi::Record)]
 pub struct Detection {
     pub(crate) name: DetectionType,
@@ -178,12 +223,17 @@ impl Detection {
     }
 }
 
+/// Collection of object detections, serialized as an object with a `detections` array.
+///
+/// Supports read-only vector access through `Deref`, owned iteration, and
+/// filtering by [`DetectionType`].
 #[derive(Debug, Clone, Default, Serialize, Deserialize, uniffi::Record)]
 pub struct ImageDetections {
     pub(crate) detections: Vec<Detection>,
 }
 
 impl ImageDetections {
+    /// Create an empty detection collection without loading models.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -191,6 +241,17 @@ impl ImageDetections {
         }
     }
 
+    /// Filter and postprocess one backend result using a matching depth map.
+    ///
+    /// Clamps `confidence_limit` to `0.0..=1.0`, then retains detections with
+    /// scores at or above the clamped threshold. Samples depth at each floored
+    /// box center, merges intersecting person/bicycle pairs into cyclists, and
+    /// removes later same-class boxes with `IoU` at least `0.9`. Merging averages
+    /// the pair's confidence and distance and joins their boxes.
+    ///
+    /// # Panics
+    /// Panics if a retained box center falls outside `depth_map`, or backend
+    /// confidence/class arrays are inconsistent with the number of boxes.
     #[instrument]
     pub fn from_detection_result(
         res: &DetectionResults,
@@ -198,6 +259,7 @@ impl ImageDetections {
         confidence_limit: f32,
     ) -> Self {
         let mut detections = Vec::new();
+        let confidence_limit = confidence_limit.clamp(0.0, 1.0);
 
         if let Some(boxes) = &res.boxes {
             for i in 0..boxes.len() {
@@ -237,6 +299,7 @@ impl ImageDetections {
         Self { detections }
     }
 
+    /// Iterate over detections whose label exactly matches `detection_type`.
     pub fn get_by_detected_object(
         &self,
         detection_type: DetectionType,
@@ -245,6 +308,10 @@ impl ImageDetections {
             .filter(move |pred| pred.name == detection_type)
     }
 
+    /// Test whether any class has at least its specified minimum count.
+    ///
+    /// An empty threshold list returns `false`; a zero minimum always matches.
+    /// This helper does not itself perform geographic classification.
     #[must_use]
     pub fn is_outside(&self, minimums: &[(DetectionType, usize)]) -> bool {
         minimums
@@ -257,6 +324,7 @@ impl ImageDetections {
             })
     }
 
+    /// Consume the collection and return its detections without cloning.
     #[must_use]
     pub fn into_inner(self) -> Vec<Detection> {
         self.detections

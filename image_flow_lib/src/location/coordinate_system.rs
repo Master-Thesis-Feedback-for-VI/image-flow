@@ -1,15 +1,25 @@
+//! Latitude/longitude coordinates shared by map requests and GPS recordings.
+
 use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
+/// Geographic latitude and longitude in decimal degrees.
+///
+/// Values are stored as supplied; construction and deserialization do not
+/// validate coordinate ranges or reject non-finite values.
 #[derive(Debug, Clone, Copy, uniffi::Record, Serialize, Deserialize)]
 pub struct Coordinate {
+    /// Latitude in degrees, normally in `-90.0..=90.0`.
     pub lat: f64,
+    /// Longitude in degrees, normally in `-180.0..=180.0`.
     pub lon: f64,
 }
 
 impl Coordinate {
-    /// This is pure for Debugging purposes
+    /// Return an OpenStreetMap link centered on this coordinate for debugging.
+    ///
+    /// Despite the method name, this returns a string and does not print it.
     #[allow(dead_code)]
     #[must_use]
     pub fn print_location_url(self) -> String {

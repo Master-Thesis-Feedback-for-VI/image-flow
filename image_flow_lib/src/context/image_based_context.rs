@@ -1,3 +1,9 @@
+//! Reusable ONNX model sessions and temporary frame-file ownership.
+//!
+//! Construct an [`ImageRecognizer`] once and reuse it. Model files are loaded
+//! from an existing directory or downloaded if missing. [`FramePath`] is also
+//! available without the `video` feature and deletes its file on drop by default.
+
 use std::path::{Path, PathBuf};
 use std::result::Result as DefaultResult;
 use std::sync::Arc;
@@ -54,20 +60,31 @@ pub(crate) fn evaluate_image_into_location_tags(
     categories
 }
 
+/// Internal state for an object-detection session and its model file.
+///
+/// Managed by [`ImageRecognizer`]; this type has no public constructor.
 #[derive(Debug)]
 pub struct ObjectDetectionModel {
     path: PathBuf,
     model: Arc<Mutex<YOLOModel>>,
 }
 
+/// Internal state for a depth-estimation session and its model file.
+///
+/// Managed by [`ImageRecognizer`]; this type has no public constructor.
 #[derive(Debug)]
 pub struct DepthDetectionModel {
     path: PathBuf,
     model: Arc<Mutex<YOLOModel>>,
 }
 
+/// Reusable object and depth models with independently locked inference sessions.
+///
+/// Construction always loads both models. Inference runs on Tokio blocking
+/// workers; requests sharing this recognizer serialize access to each model.
 #[derive(Debug, uniffi::Object)]
 pub struct ImageRecognizer {
+    /// Variant selected at construction; changing this field does not reload models.
     pub variant: ModelVariant,
     obj_detection: Arc<ObjectDetectionModel>,
     depth_recognition: Arc<DepthDetectionModel>,
@@ -75,8 +92,14 @@ pub struct ImageRecognizer {
 
 #[uniffi::export(async_runtime = "tokio")]
 impl ImageRecognizer {
+    /// Load both models of `model_variant` from an existing directory.
+    ///
+    /// Missing files are downloaded. The parameter `downlaod_path` retains its
+    /// current API spelling. See [`Self::new_impl`] for filenames and behavior.
+    ///
     /// # Errors
-    /// TODO
+    /// Returns an error if the directory does not exist, downloads or file
+    /// operations fail, or either model cannot be loaded.
     #[uniffi::constructor]
     pub async fn new(
         model_variant: ModelVariant,
@@ -86,8 +109,10 @@ impl ImageRecognizer {
         Ok(img_recognizer)
     }
 
+    /// Return the loaded object model's filesystem path as a string.
+    ///
     /// # Panics
-    /// TODO
+    /// Panics if the path contains non-UTF-8 bytes.
     #[must_use]
     pub fn object_detection_model_path(&self) -> String {
         let tmp = self
@@ -99,8 +124,10 @@ impl ImageRecognizer {
             .expect("Invalid UTF-8")
     }
 
+    /// Return the loaded depth model's filesystem path as a string.
+    ///
     /// # Panics
-    /// TODO
+    /// Panics if the path contains non-UTF-8 bytes.
     #[must_use]
     pub fn depth_detection_model_path(&self) -> String {
         let tmp = self
@@ -114,8 +141,17 @@ impl ImageRecognizer {
 }
 
 impl ImageRecognizer {
+    /// Rust path-based constructor for both inference models.
+    ///
+    /// `download_path` must already be a directory. Existing files are loaded
+    /// unchanged; missing files are downloaded from the configured Ultralytics
+    /// `v8.4.0` release through `.part` files. Both models load concurrently.
+    /// See [`ModelVariant`] for the expected local filenames. To avoid network
+    /// requests, provide both compatible ONNX files before calling this method.
+    ///
     /// # Errors
-    /// TODO
+    /// Returns an error for a missing directory, failed HTTP/download validation,
+    /// file-access failures, failed worker tasks, or invalid/unsupported models.
     #[instrument(skip(download_path), fields(download_path = tracing::field::Empty))]
     pub async fn new_impl(
         variant: ModelVariant,
@@ -198,8 +234,12 @@ impl ImageRecognizer {
         Ok(model)
     }
 
+    /// Load or download the medium object and depth models in the current directory.
+    ///
+    /// This is an async convenience function, not a `Default` trait implementation.
+    ///
     /// # Errors
-    /// TODO
+    /// Returns the directory, download, or model-loading errors from [`Self::new_impl`].
     pub async fn default() -> crate::Result<Self> {
         let model_variant = ModelVariant::Medium;
         let download_path = Path::new(".");
@@ -207,13 +247,20 @@ impl ImageRecognizer {
         Self::new_impl(model_variant, download_path).await
     }
 
+    /// Run object and depth inference concurrently, then postprocess detections.
+    ///
+    /// `confidence_limit` is clamped to `0.0..=1.0` before filtering. Objects below
+    /// the clamped threshold are discarded. Retained objects receive depth
+    /// sampled at their box centers, then person/bicycle pairs are merged into
+    /// cyclists and same-class duplicate boxes are removed.
+    ///
     /// # Errors
-    /// TODO
+    /// Returns an error for failed predictions or worker tasks, or missing depth
+    /// data in the depth model's result.
     ///
     /// # Panics
-    /// The API from Ulatralytics is weird here. Per image 1 Results struct is created containing
-    /// all Results and detections from one image. So having multiple makes no sense and there
-    /// always only exists one Results even if nothing is detected!
+    /// Panics if either backend returns other than exactly one image result, or
+    /// if a retained box center is outside the depth map.
     pub async fn predict_objects(
         &self,
         path: &Path,
@@ -245,11 +292,16 @@ impl ImageRecognizer {
         Ok(image_detections)
     }
 
+    /// Run depth inference and return the per-pixel values at image resolution.
+    ///
+    /// Values are passed through from the model without further calibration.
+    ///
     /// # Errors
-    /// TODO
+    /// Returns an error if prediction or its worker task fails, or the result
+    /// does not contain depth data.
     ///
     /// # Panics
-    /// TODO
+    /// Panics if the backend does not return exactly one image result.
     pub async fn predict_depth(&self, path: impl AsRef<Path>) -> crate::Result<DepthMap> {
         let path = path
             .as_ref()
@@ -340,12 +392,29 @@ impl ImageRecognizer {
     }
 }
 
+/// Model size and the corresponding filenames loaded by [`ImageRecognizer`].
+///
+/// | Variant | Object model | Depth model |
+/// | --- | --- | --- |
+/// | `Nano` | `yolo26n.onnx` | `yolo26n-depth.onnx` |
+/// | `Small` | `yolo26s.onnx` | `yolo26s-depth.onnx` |
+/// | `Medium` | `yolo26m.onnx` | `yolo26m-depth.onnx` |
+/// | `Large` | `yolo26l.onnx` | `yolo26l-depth.onnx` |
+/// | `XLarge` | `yolo26x.onnx` | `yolo26x-depth.onnx` |
+///
+/// Missing assets are requested from the configured release; availability is
+/// checked only when a download is attempted.
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum ModelVariant {
+    /// Nano model pair.
     Nano,
+    /// Small model pair.
     Small,
+    /// Medium model pair, used by [`ImageRecognizer::default`].
     Medium,
+    /// Large model pair.
     Large,
+    /// Extra-large model pair.
     XLarge,
 }
 
@@ -372,7 +441,7 @@ impl ModelVariant {
             Self::Small => "yolo26s-depth.onnx",
             Self::Medium => "yolo26m-depth.onnx",
             Self::Large => "yolo26l-depth.onnx",
-            Self::XLarge => "yolo26xl-depth.onnx",
+            Self::XLarge => "yolo26x-depth.onnx",
         }
     }
 
@@ -389,19 +458,30 @@ impl ModelVariant {
     }
 }
 
+/// A frame path and its recording-relative offset, with automatic file cleanup.
+///
+/// Dropping this object attempts to delete the file unless [`Self::should_drop`]
+/// is `false`. Clones copy both the path and cleanup flag; they do not coordinate
+/// ownership, so dropping any clone with cleanup enabled can delete the file.
+/// Access the path through `AsRef<Path>`.
 #[derive(Debug, uniffi::Object, Clone)]
 pub struct FramePath {
+    /// Offset relative to the first timestamped video frame.
     pub time_offset_from_first_frame: Duration,
     path: PathBuf,
+    /// Whether dropping this value attempts to delete the file; defaults to `true`.
     pub should_drop: bool,
 }
 
 #[uniffi::export]
 impl FramePath {
-    /// TODO
+    /// Wrap a path with a standard-library duration, enabling deletion on drop.
+    ///
+    /// Does not create or validate the file. The path may refer to an existing
+    /// caller-owned file, so disable cleanup to preserve it.
     ///
     /// # Panics
-    /// TODO
+    /// Panics if `offset` cannot be represented by `chrono::Duration`.
     #[uniffi::constructor]
     #[must_use]
     pub fn new(offset: DefaultDuration, path: &str) -> Self {
@@ -411,6 +491,9 @@ impl FramePath {
 }
 
 impl FramePath {
+    /// Wrap a path with a Chrono offset, enabling deletion on drop.
+    ///
+    /// Does not create or validate the file. Negative offsets are accepted.
     pub fn new_impl(offset: Duration, path: impl AsRef<Path>) -> Self {
         Self {
             time_offset_from_first_frame: offset,

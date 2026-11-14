@@ -1,3 +1,10 @@
+//! Rust errors and the flattened error enum exposed through `UniFFI`.
+//!
+//! Rust helpers use [`Error`] and [`Result`]. Exported methods convert errors to
+//! [`ImageFlowError`], retaining a category and display message. Missing files
+//! become `Io`; JSON persistence helpers categorize their file-access errors as
+//! `Serialization`.
+
 use std::{
     error::Error as StdError,
     fmt::{self, Display},
@@ -7,24 +14,48 @@ use std::{
 use tokio::task::JoinError;
 use ultralytics_inference::InferenceError;
 
+/// Error categories exposed by `UniFFI`-facing constructors and functions.
+///
+/// Messages include the originating Rust error's display text. Unlike [`Error`],
+/// this representation does not retain the source-error chain.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 #[uniffi(flat_error)]
 pub enum ImageFlowError {
+    /// HTTP transport, status, or map/model request failure.
     #[error("Request failed: {message}")]
-    Request { message: String },
+    Request {
+        /// Display text describing the failure.
+        message: String,
+    },
 
+    /// JSON/CSV encoding, decoding, or persistence-file access failure.
     #[error("Serialization failed: {message}")]
-    Serialization { message: String },
+    Serialization {
+        /// Display text describing the failure.
+        message: String,
+    },
 
+    /// Filesystem, missing-input, or worker-task failure.
     #[error("I/O failed: {message}")]
-    Io { message: String },
+    Io {
+        /// Display text describing the failure.
+        message: String,
+    },
 
+    /// Image decoding, model loading, prediction, or missing-depth failure.
     #[error("Image failure: {message}")]
-    Image { message: String },
+    Image {
+        /// Display text describing the failure.
+        message: String,
+    },
 
+    /// Video decoding or related `FFmpeg` processing failure.
     #[cfg(feature = "video")]
     #[error("FFmpeg failed: {message}")]
-    Ffmpeg { message: String },
+    Ffmpeg {
+        /// Display text describing the failure.
+        message: String,
+    },
 }
 
 impl From<Error> for ImageFlowError {
@@ -47,8 +78,14 @@ impl From<Error> for ImageFlowError {
     }
 }
 
+/// Result type returned by Rust-native library helpers.
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Rust error retaining its category and optional source error.
+///
+/// Supports `Display`, `Debug`, and [`std::error::Error::source`]. Convert into
+/// [`ImageFlowError`] when a matchable category or a `UniFFI`-compatible error is
+/// required; the detailed category is otherwise internal.
 pub struct Error {
     inner: Box<Inner>,
 }

@@ -1,3 +1,4 @@
+#![doc = include_str!("../README.md")]
 #![recursion_limit = "512"]
 #![feature(const_trait_impl)]
 #![cfg_attr(test, feature(const_cmp))]
@@ -52,21 +53,41 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use std::{result::Result as DefaultResult, sync::Arc};
 
+/// Location tags and depth-enriched object detections for a single image.
+///
+/// Rust callers can access and mutate [`Self::location_tags`] and
+/// [`Self::image_detections`] directly. The accessor methods return clones.
+/// Use [`Self::save_as_json`] to write one evaluation.
 #[derive(Debug, Clone, uniffi::Object, Deserialize, Serialize)]
 pub struct ImageFlowEvaluation {
-    location_tags: UniqueLocationTags,
-    image_detections: ImageDetections,
+    /// Geographic context tags for this image.
+    pub location_tags: UniqueLocationTags,
+    /// Detected objects with bounding boxes, confidence scores, and estimated depth.
+    pub image_detections: ImageDetections,
 }
 
+/// One evaluated recording frame with its relative timestamp and GPS coordinate.
+///
+/// A JSON array of these objects is the input to
+/// [`image_flow_evaluation_read_from_json`].
 #[derive(Serialize, Deserialize, Clone, Debug, uniffi::Object)]
 pub struct ImageFlowEvaluationForRecording {
+    /// Evaluation for this frame; serialized with the plural key `evaluations`.
     pub evaluations: ImageFlowEvaluation,
+    /// Elapsed time from the start of the recording.
     pub time_diff: Duration,
+    /// GPS coordinate paired with this frame.
     pub location: Coordinate,
 }
 
+/// Read a JSON array of recording evaluations, preserving array order.
+///
+/// This expects [`ImageFlowEvaluationForRecording`] objects, rather than the
+/// single evaluation written by [`ImageFlowEvaluation::save_as_json`].
+///
 /// # Errors
-/// TODO
+/// Returns [`ImageFlowError::Serialization`] if the file cannot be read or its
+/// JSON does not match the recording-array schema.
 #[uniffi::export(async_runtime = "tokio")]
 pub async fn image_flow_evaluation_read_from_json(
     path: &str,
@@ -83,8 +104,25 @@ pub async fn image_flow_evaluation_read_from_json(
         .collect())
 }
 
+/// Detect objects with depth estimates and classify the image's geographic context.
+///
+/// `amount` is the number of dominant-color clusters (use a small positive
+/// value); it is not validated. `confidence_limit` is clamped to `0.0..=1.0`
+/// before filtering. Detections at or above the clamped threshold are retained.
+/// `auth` configures map services; `None` selects defaults. Reuse
+/// `image_recognizer` across images.
+///
+/// Map lookup errors are logged and can produce partial tags without failing the
+/// evaluation. See [`image_flow_evaluation_impl`] for the Rust borrowing API.
+///
 /// # Errors
-/// TODO
+/// Returns an error for missing/unreadable images, inference failures,
+/// dominant-color extraction failures, or failed worker tasks. An unknown
+/// debug-build Nominatim classification panics in the spawned context task and
+/// is returned here as an I/O error.
+///
+/// # Panics
+/// Inherits inference assertions from [`ImageRecognizer::predict_objects`].
 #[uniffi::export(async_runtime = "tokio")]
 pub async fn image_flow_evaluation(
     location: Coordinate,
@@ -107,8 +145,18 @@ pub async fn image_flow_evaluation(
     Ok(img_flow)
 }
 
+/// Detect objects and attach depth sampled at each bounding-box center.
+///
+/// Runs both object and depth inference. `confidence_limit` is clamped to
+/// `0.0..=1.0` before filtering. Detections below the clamped threshold are
+/// discarded before cyclist merging and duplicate removal.
+///
 /// # Errors
-/// TODO
+/// Returns an error if the image is missing, either model cannot predict, or a
+/// worker task fails.
+///
+/// # Panics
+/// Inherits inference assertions from [`ImageRecognizer::predict_objects`].
 #[uniffi::export(async_runtime = "tokio")]
 pub async fn recognize_objects_in_image(
     path: &str,
@@ -121,8 +169,14 @@ pub async fn recognize_objects_in_image(
     Ok(detections)
 }
 
+/// Estimate per-pixel depth using the recognizer's depth model.
+///
 /// # Errors
-/// TODO
+/// Returns an error for a missing image, inference/task failures, or model output
+/// without depth data.
+///
+/// # Panics
+/// Panics if the inference backend does not return exactly one result.
 #[uniffi::export(async_runtime = "tokio")]
 pub async fn recognize_depth_in_image(
     path: &str,
@@ -133,8 +187,18 @@ pub async fn recognize_depth_in_image(
     Ok(detections)
 }
 
+/// Classify a coordinate and image colors without loading inference models.
+///
+/// `amount` is the number of dominant-color clusters; use a small positive value.
+/// This does not use object detections (including the traffic-light heuristic).
+/// Map failures are logged and treated as missing evidence.
+///
 /// # Errors
-/// TODO
+/// Returns an error if the image is missing, cannot be decoded, or color
+/// extraction fails.
+///
+/// # Panics
+/// Unknown Nominatim classifications can panic in debug builds.
 #[uniffi::export(async_runtime = "tokio")]
 pub async fn recognize_location_tags(
     location: Coordinate,
@@ -150,6 +214,12 @@ pub async fn recognize_location_tags(
 // === LOGGING ===
 static TRACING_ENABLED: AtomicBool = AtomicBool::new(false);
 
+/// Try to install a process-wide tracing subscriber at the requested level.
+///
+/// `None` defaults to [`FilterLevel::Off`]. Returns `true` after a successful
+/// installation by this library, including subsequent calls. Returns `false`
+/// if initialization fails, for example because the application already installed
+/// a subscriber. Later calls do not change an installed subscriber's level.
 #[must_use]
 #[uniffi::export]
 pub fn enable_tracing(rust_log: Option<FilterLevel>) -> bool {
@@ -171,14 +241,21 @@ pub fn enable_tracing(rust_log: Option<FilterLevel>) -> bool {
     enabled
 }
 
+/// Global log filter used by [`enable_tracing`]; defaults to no events.
 #[derive(uniffi::Enum, Clone, Copy, Debug, Default)]
 pub enum FilterLevel {
+    /// Disable all events.
     #[default]
     Off,
+    /// Enable warnings and errors.
     Warn,
+    /// Enable informational events, warnings, and errors.
     Info,
+    /// Enable debug events and all higher-severity events.
     Debug,
+    /// Enable all events.
     Trace,
+    /// Enable errors only.
     Error,
 }
 
@@ -199,8 +276,15 @@ impl Display for FilterLevel {
 
 // === IMPLEMENTATIONS ===
 
+/// Rust borrowing/path variant of [`recognize_objects_in_image`].
+///
+/// `confidence_limit` is clamped to `0.0..=1.0` before filtering detections.
+///
 /// # Errors
-/// TODO
+/// Returns an error for a missing image, inference failure, or failed worker task.
+///
+/// # Panics
+/// Inherits inference assertions from [`ImageRecognizer::predict_objects`].
 pub async fn recognize_objects_in_image_impl(
     path: impl AsRef<Path>,
     image_recognizer: &ImageRecognizer,
@@ -217,8 +301,13 @@ pub async fn recognize_objects_in_image_impl(
         .await
 }
 
+/// Rust borrowing/path variant of [`recognize_depth_in_image`].
+///
 /// # Errors
-/// TODO
+/// Returns an error for a missing image, inference/task failures, or absent depth.
+///
+/// # Panics
+/// Panics if the inference backend does not return exactly one result.
 pub async fn recognize_depth_in_image_impl(
     path: impl AsRef<Path>,
     image_recognizer: &ImageRecognizer,
@@ -234,8 +323,14 @@ pub async fn recognize_depth_in_image_impl(
         .await
 }
 
+/// Rust path variant of [`recognize_location_tags`], taking a `usize` color count.
+///
 /// # Errors
-/// TODO
+/// Returns an error for a missing/unreadable image or a failed color-extraction task.
+/// Map request errors are logged rather than propagated.
+///
+/// # Panics
+/// Unknown Nominatim classifications can panic in debug builds.
 pub async fn recognize_location_tags_impl(
     location: impl Into<Coordinate>,
     auth: Option<AuthToHost>,
@@ -257,8 +352,20 @@ pub async fn recognize_location_tags_impl(
     Ok(evaluation)
 }
 
+/// Rust borrowing/path variant of [`image_flow_evaluation`].
+///
+/// Object/depth inference and color/map analysis are joined concurrently, then
+/// image-derived tags are merged into geographic context without overriding
+/// known building containment with weaker outdoor hints. `confidence_limit` is
+/// clamped to `0.0..=1.0` before filtering detections.
+///
 /// # Errors
-/// TODO
+/// Returns an error for a missing/unreadable image, failed model inference,
+/// failed color extraction, or failed worker tasks. Map request errors are logged
+/// rather than propagated.
+///
+/// # Panics
+/// Inherits inference assertions from [`ImageRecognizer::predict_objects`].
 pub async fn image_flow_evaluation_impl(
     location: impl Into<Coordinate>,
     auth: Option<AuthToHost>,
@@ -311,6 +418,7 @@ pub async fn image_flow_evaluation_impl(
 
 #[uniffi::export(async_runtime = "tokio")]
 impl ImageFlowEvaluation {
+    /// Construct an evaluation from already-computed tags and detections.
     #[uniffi::constructor]
     #[must_use]
     pub const fn new(location_tags: UniqueLocationTags, image_detections: ImageDetections) -> Self {
@@ -320,8 +428,14 @@ impl ImageFlowEvaluation {
         }
     }
 
+    /// Write one evaluation as pretty JSON, overwriting an existing file.
+    ///
+    /// Parent directories must already exist. This writes a single object, not
+    /// the recording array expected by [`image_flow_evaluation_read_from_json`].
+    ///
     /// # Errors
-    /// TODO
+    /// Returns [`ImageFlowError::Serialization`] for JSON encoding or file-write
+    /// failures.
     pub async fn save_as_json(&self, path: &str) -> DefaultResult<(), ImageFlowError> {
         let json = serde_json::to_string_pretty(self).map_err(crate::error::serialization)?;
 
@@ -332,12 +446,14 @@ impl ImageFlowEvaluation {
         Ok(())
     }
 
+    /// Return an independent clone of this evaluation's location tags.
     #[must_use]
     pub fn location_tags(&self) -> UniqueLocationTags {
         self.location_tags
             .clone()
     }
 
+    /// Return an independent clone of this evaluation's detections.
     #[must_use]
     pub fn image_detections(&self) -> ImageDetections {
         self.image_detections
@@ -347,6 +463,7 @@ impl ImageFlowEvaluation {
 
 #[uniffi::export]
 impl ImageFlowEvaluationForRecording {
+    /// Pair an evaluation with its recording-relative time and coordinate.
     #[uniffi::constructor]
     #[must_use]
     pub fn new(
@@ -362,17 +479,20 @@ impl ImageFlowEvaluationForRecording {
         }
     }
 
+    /// Return an independent clone of the frame's evaluation.
     #[must_use]
     pub fn evaluation(&self) -> ImageFlowEvaluation {
         self.evaluations
             .clone()
     }
 
+    /// Return the elapsed time from the start of the recording.
     #[must_use]
     pub const fn time_diff(&self) -> Duration {
         self.time_diff
     }
 
+    /// Return the coordinate paired with this frame.
     #[must_use]
     pub const fn location(&self) -> Coordinate {
         self.location

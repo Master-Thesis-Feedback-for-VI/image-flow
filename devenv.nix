@@ -20,6 +20,9 @@
     imagemagick
   ];
 
+  # ffmpeg-sys-next uses bindgen, which loads libclang dynamically.
+  env.LIBCLANG_PATH = "${lib.getLib pkgs.llvmPackages.libclang}/lib";
+
   languages = {
     rust = {
       enable = true;

@@ -1,3 +1,9 @@
+//! Geographic/context labels and their insertion rules.
+//!
+//! Inserting `Forest` or `Intersection` implies `Outside`; inserting `Parking`
+//! implies `Street`. `Outside` takes precedence over `Inside`. These rules apply
+//! to insertion/collection, not to direct Serde deserialization or removal.
+
 use std::{
     collections::{HashSet, hash_set},
     fmt::Display,
@@ -6,25 +12,33 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-/// All potential geographic categories supported.
-///
-/// <https://github.com/Master-Thesis-Feedback-for-VI/image-flow/issues/2>
+/// Supported geographic/context labels, ordered by declaration for sorting.
 #[allow(dead_code)]
 #[derive(
     uniffi::Enum, Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
 pub enum LocationTag {
+    /// Railway context.
     Railway,
+    /// Parking context; implies [`Self::Street`].
     Parking,
+    /// Street context; does not itself imply [`Self::Outside`].
     Street,
+    /// Pedestrian route or area.
     Pedestrian,
+    /// Intersection context; implies [`Self::Outside`].
     Intersection,
+    /// Forest or foliage-like image context; implies [`Self::Outside`].
     Forest,
+    /// Outdoor evidence; removes [`Self::Inside`] on insertion.
     Outside,
+    /// Indoor evidence, retained only while [`Self::Outside`] is absent.
     Inside,
+    /// Elevator context; does not itself imply [`Self::Inside`].
     Elevator,
 }
 
+/// Return a copy sorted in enum declaration order, preserving duplicate entries.
 #[uniffi::export]
 #[must_use]
 pub fn sort_location_tags(categories: &[LocationTag]) -> Vec<LocationTag> {
@@ -34,6 +48,7 @@ pub fn sort_location_tags(categories: &[LocationTag]) -> Vec<LocationTag> {
 }
 
 impl LocationTag {
+    /// Return the tags inserted for this label, including the label itself.
     #[must_use]
     pub const fn implied_additional_categories(self) -> &'static [Self] {
         match self {
@@ -50,12 +65,28 @@ impl LocationTag {
     }
 }
 
+/// Unordered set of context tags with implication and indoor/outdoor insertion rules.
+///
+/// Insertion and `Extend` expand [`LocationTag::implied_additional_categories`]
+/// and remove `Inside` whenever `Outside` is present. Iteration and serialized
+/// array order are unspecified. Serde stores `{"categories": [...]}` and does
+/// not normalize tags on deserialization. Removal does not undo implications.
+///
+/// ```
+/// use image_flow::location::tag::{LocationTag, UniqueLocationTags};
+///
+/// let mut tags = UniqueLocationTags::new_singular(LocationTag::Parking);
+/// assert!(tags.contains(LocationTag::Street));
+/// tags.remove(&LocationTag::Parking);
+/// assert!(tags.contains(LocationTag::Street));
+/// ```
 #[derive(Clone, Debug, Default, Serialize, Deserialize, uniffi::Record)]
 pub struct UniqueLocationTags {
     categories: HashSet<LocationTag>,
 }
 
 impl UniqueLocationTags {
+    /// Create an empty set.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -63,6 +94,7 @@ impl UniqueLocationTags {
         }
     }
 
+    /// Create a set with one label and any tags implied by it.
     #[must_use]
     pub fn new_singular(category: LocationTag) -> Self {
         let mut uniq = Self::new();
@@ -70,12 +102,14 @@ impl UniqueLocationTags {
         uniq
     }
 
+    /// Borrow tags in unspecified order without removing them.
     #[must_use]
     pub fn iter(&self) -> hash_set::Iter<'_, LocationTag> {
         self.categories
             .iter()
     }
 
+    /// Insert a label and its implications, resolving `Inside`/`Outside` conflicts.
     pub fn insert(&mut self, context_category: LocationTag) {
         self.extend([context_category]);
     }
@@ -96,23 +130,29 @@ impl UniqueLocationTags {
         );
     }
 
+    /// Test whether a label is present.
     #[must_use]
     pub fn contains(&self, context_category: LocationTag) -> bool {
         self.categories
             .contains(&context_category)
     }
 
+    /// Test whether no labels are present.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.categories
             .is_empty()
     }
 
+    /// Remove and return all labels, leaving this set empty.
+    ///
+    /// Use [`Self::iter`] to inspect tags without draining the set.
     #[must_use]
     pub fn categories(&mut self) -> HashSet<LocationTag> {
         mem::take(&mut self.categories)
     }
 
+    /// Remove only this label; previously implied labels remain present.
     pub fn remove(&mut self, tag: &LocationTag) {
         self.categories
             .remove(tag);
