@@ -1,6 +1,11 @@
+//! Location tags from Nominatim, Overpass, and dominant image colors.
+//!
+//! Request failures are logged and treated as missing evidence. Tagging can
+//! therefore return partial or empty results. The top-level
+//! [`crate::recognize_location_tags`] also handles image loading and color extraction.
+
 use std::sync::Arc;
 
-use palette::cast::ComponentsInto;
 use tracing::{Span, instrument};
 
 use crate::{
@@ -20,6 +25,14 @@ const MIN_INTERSECTION_NODES: usize = 2;
 const STREET_GPS_TOLERANCE_M: f64 = 2.0;
 const STREET_SEARCH_RADIUS_M: f64 = 50.0;
 
+/// Combine geographic evidence with weaker dominant-color hints.
+///
+/// Outdoor image hints do not override a known building-containment result.
+/// Most callers should use [`crate::recognize_location_tags`], since the
+/// dominant-color type is defined in an internal module.
+///
+/// # Panics
+/// Unknown Nominatim classifications can panic in debug builds.
 pub async fn evaluate_image_and_location_as_location_tags(
     pos: impl Into<Coordinate>,
     auth: Option<Arc<AuthToHost>>,
@@ -34,6 +47,10 @@ pub async fn evaluate_image_and_location_as_location_tags(
     cats
 }
 
+/// Return `Forest` (and its implied `Outside`) if a dominant color resembles foliage.
+///
+/// Returns an empty set otherwise. Most callers should use
+/// [`crate::recognize_location_tags`] to load an image and extract its colors.
 #[must_use]
 pub fn evaluate_image_as_location_tags(dominant_colors: &DominantColors) -> UniqueLocationTags {
     if dominant_colors.any_close_to_forest_green() {
@@ -43,10 +60,19 @@ pub fn evaluate_image_as_location_tags(dominant_colors: &DominantColors) -> Uniq
     }
 }
 
-/// TODO
+/// Classify coordinates using map data without loading an image or models.
 ///
-/// # Errors
-/// TODO
+/// Queries building containment, intersections, reverse geocoding, and street
+/// distance. Request/parse failures are logged and omitted rather than returned
+/// as errors. Known building containment takes precedence over weaker outdoor
+/// hints, except when road-surface distance is within two meters of GPS tolerance.
+/// `auth` selects custom endpoints; `None` selects the defaults.
+///
+/// The misspelling `loaction` is retained in the current public API.
+///
+/// # Panics
+/// Panics in debug builds for an unknown Nominatim class/type. In release builds
+/// that error is logged and its tags are omitted.
 pub async fn evaluate_location_as_loaction_tags(
     pos: impl Into<Coordinate>,
     auth: Option<Arc<AuthToHost>>,
@@ -155,7 +181,7 @@ impl LocationTag {
             | "residential" | "living_street" | "cycleway" => {
                 categories.insert(Self::Street);
             }
-            "railway" | "ticket_validator" | "platform" => {
+            "railway" => {
                 categories.insert(Self::Railway);
             }
             _ => {

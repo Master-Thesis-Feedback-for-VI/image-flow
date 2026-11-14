@@ -1,3 +1,9 @@
+//! Timestamped GPS rows and searches relative to the first CSV timestamp.
+//!
+//! CSV headers are `timestamp,latitude,longitude`. Timestamps are Unix seconds,
+//! including fractions. Parsing preserves row order and computes each offset
+//! relative to the first row; supply chronologically ordered input.
+
 use std::{io, ops::Deref};
 
 use chrono::{DateTime, Duration, TimeDelta, TimeZone, Utc};
@@ -5,6 +11,10 @@ use serde::{Deserialize, Deserializer};
 
 use crate::location::coordinate_system::Coordinate;
 
+/// One timestamped GPS sample, including an offset relative to its recording.
+///
+/// [`DataPointsGPS::from_csv`] computes the offset; direct deserialization
+/// defaults it to zero if omitted. Coordinates are retained without validation.
 #[derive(Deserialize, Debug, Clone, Copy)]
 pub struct TabularGPS {
     #[serde(deserialize_with = "de_ts")]
@@ -16,6 +26,7 @@ pub struct TabularGPS {
 }
 
 impl TabularGPS {
+    /// Return the sample's latitude and longitude.
     #[must_use]
     pub fn coordinates(&self) -> Coordinate {
         (*self).into()
@@ -31,6 +42,10 @@ impl From<TabularGPS> for Coordinate {
     }
 }
 
+/// Ordered GPS samples with relative offsets computed by [`Self::from_csv`].
+///
+/// Read-only vector access is available through `Deref`. Direct Serde
+/// deserialization does not compute recording-relative offsets.
 #[derive(Deserialize, Debug, Clone)]
 pub struct DataPointsGPS(Vec<TabularGPS>);
 
@@ -43,8 +58,16 @@ impl Deref for DataPointsGPS {
 }
 
 impl DataPointsGPS {
+    /// Parse GPS CSV and calculate offsets relative to the first row.
+    ///
+    /// Requires `timestamp`, `latitude`, and `longitude` headers. Timestamps are
+    /// finite Unix seconds, optionally fractional. Empty input yields no samples;
+    /// input order is preserved rather than sorted. Any supplied `offset` column
+    /// is replaced by the calculated value.
+    ///
     /// # Errors
-    /// TODO
+    /// Returns a serialization error for CSV/read failures, missing or malformed
+    /// fields, or invalid/out-of-range timestamps.
     pub fn from_csv(rdr: impl io::Read) -> crate::Result<Self> {
         let mut rdr = csv::Reader::from_reader(rdr);
         let mut points: Vec<TabularGPS> = rdr
@@ -64,6 +87,9 @@ impl DataPointsGPS {
         Ok(Self(points))
     }
 
+    /// Iterate over samples within an inclusive window around `offset`.
+    ///
+    /// Uses the absolute value of `range_around_offset`, preserving input order.
     pub fn fetch(
         &self,
         offset: Duration,
@@ -78,6 +104,10 @@ impl DataPointsGPS {
             })
     }
 
+    /// Return the nearest sample in an inclusive tolerance window, if any.
+    ///
+    /// Ties keep the first sample in input order. Negative tolerance is treated
+    /// as its absolute value.
     #[must_use]
     pub fn fetch_best_match(
         &self,
@@ -88,6 +118,8 @@ impl DataPointsGPS {
             .best_match_by_distance(offset)
     }
 
+    /// Iterate over samples between inclusive offset bounds in input order.
+    ///
     /// # Panics
     /// This function panics if `lower_bound > upper_bound`.
     pub fn fetch_within_bounds(
@@ -105,6 +137,14 @@ impl DataPointsGPS {
             })
     }
 
+    /// Return all samples near a regular offset grid, preserving input order.
+    ///
+    /// Grid offsets start at zero and stop before the last row's offset. A
+    /// sample matches when its distance from any grid point is strictly less
+    /// than the absolute tolerance. Multiple samples can match one grid point;
+    /// this does not select only a single best sample per interval. Zero
+    /// tolerance returns no samples.
+    ///
     /// # Panics
     /// Panics if `interval` is zero or negative.
     pub fn fetch_every(
@@ -140,7 +180,11 @@ impl DataPointsGPS {
     }
 }
 
+/// Select the sample closest in time from an iterator of borrowed GPS rows.
 pub trait BestMatchByDistance<'a> {
+    /// Return the row with the smallest absolute offset difference.
+    ///
+    /// Empty iterators return `None`; ties retain the first matching row.
     fn best_match_by_distance(self, offset: Duration) -> Option<&'a TabularGPS>;
 }
 

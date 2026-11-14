@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-readme.workspace = true
+readme = "README.md"
 description.workspace = true
 categories.workspace = true
 keywords.workspace = true
@@ -61,7 +61,7 @@ ndarray = { version = "0.17", features = ["serde"] }
 
 # THIS VERSION IS PINNED BECUASE THESE DEVS DO NOT KNOW WHAT PATCHES ARE FOR. UPDATING THIS
 # MIGHT VERY WELL BREAK THIS LIB. UPDATE ONLY IF ARE READY TO FIX ISSUES.
-ultralytics-inference = { version = "0.0.54", default-features = false, features = [
+ultralytics-inference = { version = "=0.0.54", default-features = false, features = [
   "annotate",
 ] }
 

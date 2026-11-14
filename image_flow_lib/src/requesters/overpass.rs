@@ -37,7 +37,8 @@ const STREET_TYPES: &str = "motorway|motorway_link|trunk|trunk_link|primary|prim
 /// Fetching the raw data from Overpass.
 ///
 /// # Errors
-/// TODO
+/// Returns a request error if all configured endpoints fail, or a serialization
+/// error if the final response cannot be decoded as JSON.
 pub async fn fetch_raw_overpass_data(
     query: &str,
     auth: Option<Arc<AuthToHost>>,

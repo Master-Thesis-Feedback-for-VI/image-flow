@@ -1,3 +1,9 @@
+//! Raw reverse-geocoding requests to a default or authenticated Nominatim service.
+//!
+//! With no [`AuthToHost`], the endpoint is the build-time `NOMINATIM_URL` or
+//! `https://nominatim.openstreetmap.org`. Reverse geocoding finds a nearby mapped
+//! feature; it does not by itself prove that the coordinate is inside a building.
+
 use std::sync::Arc;
 
 use serde::Deserialize;
@@ -8,18 +14,21 @@ use crate::{
     requesters::{AuthToHost, client::throttled_get},
 };
 
-// TODO: Implement the above!
-/// We could use here overpass agin to fetch what is arounfd the user instead of the nearest
-/// availble object
+// Compile-time default; explicit AuthToHost configuration takes precedence.
 const NOMINATIM_URL: &str = match option_env!("NOMINATIM_URL") {
     Some(url) => url,
     None => "https://nominatim.openstreetmap.org",
 };
 
-/// Fetching the raw data from nominatim.
+/// Reverse-geocode a coordinate and return the raw JSON response.
+///
+/// Requests zoom level 18, address details, extra tags, and name details.
+/// `auth` supplies a custom base URL and Basic authentication; otherwise the
+/// compile-time default is used. The response is not classified into tags here.
 ///
 /// # Errors
-/// TODO
+/// Returns a request error for transport failures, unsuccessful HTTP status,
+/// or a response that is not valid JSON.
 pub async fn fetch_raw_nominatim_data<T: Into<Coordinate>>(
     coordinates: T,
     auth: Option<Arc<AuthToHost>>,
