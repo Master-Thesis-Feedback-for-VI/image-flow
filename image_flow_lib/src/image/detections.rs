@@ -190,6 +190,18 @@ impl BoundingBox {
     pub const fn is_similar_bb(self, other: Self, threshold: f32) -> bool {
         self.iou(other) >= threshold
     }
+
+    /// Gets the top left corner in `(x, y)` shape.
+    #[must_use]
+    pub const fn top_left_corner(&self) -> (f32, f32) {
+        (self.x1, self.y1)
+    }
+
+    /// Gets the bottom right corner in `(x, y)` shape.
+    #[must_use]
+    pub const fn bottom_right_corner(&self) -> (f32, f32) {
+        (self.x2, self.y2)
+    }
 }
 
 /// One object's label, pixel bounds, sampled depth, and confidence.
@@ -200,10 +212,10 @@ impl BoundingBox {
 /// private to Rust callers; use Serde or `Debug` to inspect all values.
 #[derive(Debug, Clone, Serialize, Deserialize, uniffi::Record)]
 pub struct Detection {
-    pub(crate) name: DetectionType,
-    xyxy: BoundingBox,
-    distance: f32,
-    confidence: f32,
+    pub name: DetectionType,
+    pub xyxy: BoundingBox,
+    pub distance: f32,
+    pub confidence: f32,
 }
 
 impl Detection {
